@@ -24,7 +24,9 @@ static constexpr uint8_t SERVO2_ID = 2;
 // 4. Upload once, then set SET_ID_MODE back to false and upload again.
 static constexpr bool SET_ID_MODE = false;
 static constexpr uint8_t OLD_SERVO_ID = 0;
-static constexpr uint8_t NEW_SERVO_ID = 2;
+static constexpr uint8_t NEW_SERVO_ID = 1;
+static constexpr uint8_t SCAN_START_ID = 0;
+static constexpr uint8_t SCAN_END_ID = 254;
 
 HardwareSerial ServoSerial(1);
 FSUS_Protocol protocol;
@@ -35,6 +37,30 @@ FSUS_Servo servo2(SERVO2_ID, &protocol);
 bool servo0Online = false;
 bool servo1Online = false;
 bool servo2Online = false;
+
+static void logPrint(const char *message) {
+  Serial.print(message);
+  Serial0.print(message);
+}
+
+static void logPrintln() {
+  Serial.println();
+  Serial0.println();
+}
+
+static void logPrintln(const char *message) {
+  Serial.println(message);
+  Serial0.println(message);
+}
+
+static void logPrintf(const char *format, ...) {
+  char buffer[160];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(buffer, sizeof(buffer), format, args);
+  va_end(args);
+  logPrint(buffer);
+}
 
 static void waitForSerialMonitor(uint32_t timeoutMs) {
   const uint32_t start = millis();
@@ -66,18 +92,20 @@ static const char *statusName(FSUS_STATUS status) {
   }
 }
 
-static bool pingServo(uint8_t id) {
+static bool pingServo(uint8_t id, bool printOffline = true) {
   FSUS_Servo probe(id, &protocol);
   const bool online = probe.ping();
-  Serial.printf("servo #%u is %s, status=%s\r\n", id,
-                online ? "online" : "offline",
-                statusName(protocol.responsePack.recv_status));
+  if (online || printOffline) {
+    logPrintf("servo #%u is %s, status=%s\r\n", id,
+              online ? "online" : "offline",
+              statusName(protocol.responsePack.recv_status));
+  }
   return online;
 }
 
 static bool setServoId(uint8_t oldId, uint8_t newId) {
   if (newId > 254) {
-    Serial.println("Invalid new ID. Valid range is 0..254.");
+    logPrintln("Invalid new ID. Valid range is 0..254.");
     return false;
   }
 
@@ -91,7 +119,7 @@ static bool setServoId(uint8_t oldId, uint8_t newId) {
   const FSUS_STATUS status =
       protocol.recvWriteData(&replyServoId, &replyAddress, &result);
 
-  Serial.printf(
+  logPrintf(
       "Set ID %u -> %u: status=%s, replyServoId=%u, address=%u, result=%s\r\n",
       oldId, newId, statusName(status), replyServoId, replyAddress,
       result ? "true" : "false");
@@ -101,50 +129,50 @@ static bool setServoId(uint8_t oldId, uint8_t newId) {
 }
 
 static void runIdSettingMode() {
-  Serial.println("ID setting mode");
-  Serial.println("Only one servo should be connected to the bus.");
-  Serial.printf("Changing servo ID from %u to %u\r\n", OLD_SERVO_ID,
-                NEW_SERVO_ID);
+  logPrintln("ID setting mode");
+  logPrintln("Only one servo should be connected to the bus.");
+  logPrintf("Changing servo ID from %u to %u\r\n", OLD_SERVO_ID,
+            NEW_SERVO_ID);
 
   if (!pingServo(OLD_SERVO_ID)) {
-    Serial.println("Old ID did not respond. Check wiring or OLD_SERVO_ID.");
+    logPrintln("Old ID did not respond. Check wiring or OLD_SERVO_ID.");
     return;
   }
 
   if (!setServoId(OLD_SERVO_ID, NEW_SERVO_ID)) {
-    Serial.println("ID write failed.");
+    logPrintln("ID write failed.");
     return;
   }
 
   delay(500);
-  Serial.println("Verifying new ID...");
+  logPrintln("Verifying new ID...");
   pingServo(NEW_SERVO_ID);
 }
 
 static void scanServos() {
-  Serial.println("Scanning servo IDs 0..9");
+  logPrintf("Scanning servo IDs %u..%u\r\n", SCAN_START_ID, SCAN_END_ID);
   bool found = false;
-  for (uint8_t id = 0; id <= 9; ++id) {
-    if (pingServo(id)) {
+  for (uint16_t id = SCAN_START_ID; id <= SCAN_END_ID; ++id) {
+    if (pingServo(id, false)) {
       found = true;
     }
     delay(50);
   }
 
   if (!found) {
-    Serial.println("No servo found in 0..9.");
+    logPrintf("No servo found in %u..%u.\r\n", SCAN_START_ID, SCAN_END_ID);
   }
 }
 
 static bool initServo(FSUS_Servo &servo) {
-  Serial.printf("Testing configured servo id=%u\r\n", servo.servoId);
+  logPrintf("Testing configured servo id=%u\r\n", servo.servoId);
   if (!servo.ping()) {
-    Serial.printf("servo #%u is offline, status=%s\r\n", servo.servoId,
-                  statusName(protocol.responsePack.recv_status));
+    logPrintf("servo #%u is offline, status=%s\r\n", servo.servoId,
+              statusName(protocol.responsePack.recv_status));
     return false;
   }
 
-  Serial.printf("servo #%u is online.\r\n", servo.servoId);
+  logPrintf("servo #%u is online.\r\n", servo.servoId);
   servo.init();
   return true;
 }
@@ -164,7 +192,7 @@ static void setServoAngle(FSUS_Servo &servo, bool online, float angle) {
     return;
   }
 
-  Serial.printf("Set servo #%u raw angle = %.1f deg\r\n", servo.servoId, angle);
+  logPrintf("Set servo #%u raw angle = %.1f deg\r\n", servo.servoId, angle);
   servo.setRawAngleByInterval(angle, 1000, 100, 100, 0);
 }
 
@@ -174,9 +202,9 @@ static void reportServoAngle(FSUS_Servo &servo, bool online) {
   }
 
   const float currentAngle = servo.queryRawAngle();
-  Serial.printf("servo #%u current raw angle = %.1f deg, status=%s\r\n",
-                servo.servoId, currentAngle,
-                statusName(protocol.responsePack.recv_status));
+  logPrintf("servo #%u current raw angle = %.1f deg, status=%s\r\n",
+            servo.servoId, currentAngle,
+            statusName(protocol.responsePack.recv_status));
 }
 
 static void moveAllAndReport(float servo0Angle, float servo1Angle,
@@ -193,13 +221,14 @@ static void moveAllAndReport(float servo0Angle, float servo1Angle,
 
 void setup() {
   Serial.begin(115200);
+  Serial0.begin(115200);
   waitForSerialMonitor(3000);
   delay(200);
 
-  Serial.println();
-  Serial.println("FashionStar UART servo test on ESP32-S3");
-  Serial.printf("Servo UART: baud=%lu RX=%d TX=%d\r\n", SERVO_BAUDRATE,
-                SERVO_RX_PIN, SERVO_TX_PIN);
+  logPrintln();
+  logPrintln("FashionStar UART servo test on ESP32-S3");
+  logPrintf("Servo UART: baud=%lu RX=%d TX=%d\r\n", SERVO_BAUDRATE,
+            SERVO_RX_PIN, SERVO_TX_PIN);
 
   ServoSerial.begin(SERVO_BAUDRATE, SERIAL_8N1, SERVO_RX_PIN, SERVO_TX_PIN);
   protocol.baudrate = SERVO_BAUDRATE;
@@ -223,8 +252,8 @@ void loop() {
   if (!anyConfiguredServoOnline()) {
     if (millis() - lastRetryMs >= 3000) {
       lastRetryMs = millis();
-      Serial.println();
-      Serial.println("No configured servos online. Rescanning...");
+      logPrintln();
+      logPrintln("No configured servos online. Rescanning...");
       scanServos();
       refreshConfiguredServos();
     }
