@@ -4,17 +4,22 @@
 #include "FashionStar_UartServoProtocol.h"
 
 // Your wiring:
-// Controller TX -> ESP32-S3 GPIO17, so GPIO17 is ESP RX.
-// Controller RX -> ESP32-S3 GPIO16, so GPIO16 is ESP TX.
+// Servo driver TX -> ESP32-S3 RX.
+// Servo driver RX -> ESP32-S3 TX.
 // GND must be common.
-static constexpr int SERVO_RX_PIN = 17;
-static constexpr int SERVO_TX_PIN = 16;
+static constexpr int SERVO_A_RX_PIN = 17;
+static constexpr int SERVO_A_TX_PIN = 16;
+static constexpr int SERVO_B_RX_PIN = 10;
+static constexpr int SERVO_B_TX_PIN = 9;
 static constexpr uint32_t SERVO_BAUDRATE = 115200;
 
-// Change these if your two servos use different IDs.
-static constexpr uint8_t SERVO0_ID = 0;
-static constexpr uint8_t SERVO1_ID = 1;
-static constexpr uint8_t SERVO2_ID = 2;
+// Set to false to skip servo scanning/initialization and enter loop() directly.
+static constexpr bool ENABLE_SERVO_DETECTION = false;
+
+static constexpr uint8_t CONFIGURED_SERVO_START_ID = 0;
+static constexpr uint8_t CONFIGURED_SERVO_END_ID = 16;
+static constexpr uint8_t CONFIGURED_SERVO_COUNT =
+    CONFIGURED_SERVO_END_ID - CONFIGURED_SERVO_START_ID + 1;
 
 // ID setting mode is intentionally disabled by default.
 // To change one servo from ID 0 to ID 1:
@@ -22,21 +27,40 @@ static constexpr uint8_t SERVO2_ID = 2;
 // 2. Set SET_ID_MODE to true.
 // 3. Set OLD_SERVO_ID/NEW_SERVO_ID.
 // 4. Upload once, then set SET_ID_MODE back to false and upload again.
-static constexpr bool SET_ID_MODE = false;
+static constexpr bool SET_ID_MODE = true;
 static constexpr uint8_t OLD_SERVO_ID = 0;
-static constexpr uint8_t NEW_SERVO_ID = 1;
+static constexpr uint8_t NEW_SERVO_ID = 16;
 static constexpr uint8_t SCAN_START_ID = 0;
 static constexpr uint8_t SCAN_END_ID = 254;
 
-HardwareSerial ServoSerial(1);
-FSUS_Protocol protocol;
-FSUS_Servo servo0(SERVO0_ID, &protocol);
-FSUS_Servo servo1(SERVO1_ID, &protocol);
-FSUS_Servo servo2(SERVO2_ID, &protocol);
+struct ServoBus {
+  const char *name;
+  HardwareSerial *serial;
+  FSUS_Protocol *protocol;
+  FSUS_Servo *servos;
+  bool *online;
+  int rxPin;
+  int txPin;
+};
 
-bool servo0Online = false;
-bool servo1Online = false;
-bool servo2Online = false;
+HardwareSerial ServoSerialA(1);
+HardwareSerial ServoSerialB(2);
+FSUS_Protocol protocolA;
+FSUS_Protocol protocolB;
+FSUS_Servo servosA[CONFIGURED_SERVO_COUNT];
+FSUS_Servo servosB[CONFIGURED_SERVO_COUNT];
+
+bool servoOnlineA[CONFIGURED_SERVO_COUNT] = {};
+bool servoOnlineB[CONFIGURED_SERVO_COUNT] = {};
+
+ServoBus servoBuses[] = {
+    {"A", &ServoSerialA, &protocolA, servosA, servoOnlineA, SERVO_A_RX_PIN,
+     SERVO_A_TX_PIN},
+    {"B", &ServoSerialB, &protocolB, servosB, servoOnlineB, SERVO_B_RX_PIN,
+     SERVO_B_TX_PIN},
+};
+static constexpr uint8_t SERVO_BUS_COUNT =
+    sizeof(servoBuses) / sizeof(servoBuses[0]);
 
 static void logPrint(const char *message) {
   Serial.print(message);
@@ -92,131 +116,170 @@ static const char *statusName(FSUS_STATUS status) {
   }
 }
 
-static bool pingServo(uint8_t id, bool printOffline = true) {
-  FSUS_Servo probe(id, &protocol);
+static bool pingServo(ServoBus &bus, uint8_t id, bool printOffline = true) {
+  FSUS_Servo probe(id, bus.protocol);
   const bool online = probe.ping();
   if (online || printOffline) {
-    logPrintf("servo #%u is %s, status=%s\r\n", id,
+    logPrintf("bus %s servo #%u is %s, status=%s\r\n", bus.name, id,
               online ? "online" : "offline",
-              statusName(protocol.responsePack.recv_status));
+              statusName(bus.protocol->responsePack.recv_status));
   }
   return online;
 }
 
-static bool setServoId(uint8_t oldId, uint8_t newId) {
+static bool setServoId(ServoBus &bus, uint8_t oldId, uint8_t newId) {
   if (newId > 254) {
     logPrintln("Invalid new ID. Valid range is 0..254.");
     return false;
   }
 
   uint8_t content[] = {newId};
-  protocol.emptyCache();
-  protocol.sendWriteData(oldId, FSUS_PARAM_SERVO_ID, sizeof(content), content);
+  bus.protocol->emptyCache();
+  bus.protocol->sendWriteData(oldId, FSUS_PARAM_SERVO_ID, sizeof(content),
+                              content);
 
   FSUS_SERVO_ID_T replyServoId = 0;
   uint8_t replyAddress = 0;
   bool result = false;
   const FSUS_STATUS status =
-      protocol.recvWriteData(&replyServoId, &replyAddress, &result);
+      bus.protocol->recvWriteData(&replyServoId, &replyAddress, &result);
 
   logPrintf(
-      "Set ID %u -> %u: status=%s, replyServoId=%u, address=%u, result=%s\r\n",
-      oldId, newId, statusName(status), replyServoId, replyAddress,
+      "bus %s set ID %u -> %u: status=%s, replyServoId=%u, address=%u, "
+      "result=%s\r\n",
+      bus.name, oldId, newId, statusName(status), replyServoId, replyAddress,
       result ? "true" : "false");
 
   return status == FSUS_STATUS_SUCCESS && replyAddress == FSUS_PARAM_SERVO_ID &&
          result;
 }
 
-static void runIdSettingMode() {
+static void runIdSettingMode(ServoBus &bus) {
   logPrintln("ID setting mode");
   logPrintln("Only one servo should be connected to the bus.");
-  logPrintf("Changing servo ID from %u to %u\r\n", OLD_SERVO_ID,
-            NEW_SERVO_ID);
+  logPrintf("Bus %s changing servo ID from %u to %u\r\n", bus.name,
+            OLD_SERVO_ID, NEW_SERVO_ID);
 
-  if (!pingServo(OLD_SERVO_ID)) {
+  if (!pingServo(bus, OLD_SERVO_ID)) {
     logPrintln("Old ID did not respond. Check wiring or OLD_SERVO_ID.");
     return;
   }
 
-  if (!setServoId(OLD_SERVO_ID, NEW_SERVO_ID)) {
+  if (!setServoId(bus, OLD_SERVO_ID, NEW_SERVO_ID)) {
     logPrintln("ID write failed.");
     return;
   }
 
   delay(500);
   logPrintln("Verifying new ID...");
-  pingServo(NEW_SERVO_ID);
+  pingServo(bus, NEW_SERVO_ID);
 }
 
-static void scanServos() {
-  logPrintf("Scanning servo IDs %u..%u\r\n", SCAN_START_ID, SCAN_END_ID);
+static void scanServos(ServoBus &bus) {
+  logPrintf("Bus %s scanning servo IDs %u..%u\r\n", bus.name, SCAN_START_ID,
+            SCAN_END_ID);
   bool found = false;
   for (uint16_t id = SCAN_START_ID; id <= SCAN_END_ID; ++id) {
-    if (pingServo(id, false)) {
+    if (pingServo(bus, id, false)) {
       found = true;
     }
     delay(50);
   }
 
   if (!found) {
-    logPrintf("No servo found in %u..%u.\r\n", SCAN_START_ID, SCAN_END_ID);
+    logPrintf("No servo found on bus %s in %u..%u.\r\n", bus.name,
+              SCAN_START_ID, SCAN_END_ID);
   }
 }
 
-static bool initServo(FSUS_Servo &servo) {
-  logPrintf("Testing configured servo id=%u\r\n", servo.servoId);
+static bool initServo(ServoBus &bus, FSUS_Servo &servo) {
+  logPrintf("Testing bus %s configured servo id=%u\r\n", bus.name,
+            servo.servoId);
   if (!servo.ping()) {
-    logPrintf("servo #%u is offline, status=%s\r\n", servo.servoId,
-              statusName(protocol.responsePack.recv_status));
+    logPrintf("bus %s servo #%u is offline, status=%s\r\n", bus.name,
+              servo.servoId,
+              statusName(bus.protocol->responsePack.recv_status));
     return false;
   }
 
-  logPrintf("servo #%u is online.\r\n", servo.servoId);
+  logPrintf("bus %s servo #%u is online.\r\n", bus.name, servo.servoId);
   servo.init();
   return true;
 }
 
-static void refreshConfiguredServos() {
-  servo0Online = initServo(servo0);
-  servo1Online = initServo(servo1);
-  servo2Online = initServo(servo2);
+static void initConfiguredServoObjects(ServoBus &bus) {
+  for (uint8_t i = 0; i < CONFIGURED_SERVO_COUNT; ++i) {
+    bus.servos[i].servoId = CONFIGURED_SERVO_START_ID + i;
+    bus.servos[i].protocol = bus.protocol;
+    bus.servos[i].isOnline = false;
+    bus.servos[i].isMTurn = false;
+    bus.servos[i].angleMin = FSUS_SERVO_ANGLE_MIN;
+    bus.servos[i].angleMax = FSUS_SERVO_ANGLE_MAX;
+    bus.servos[i].speed = FSUS_SERVO_SPEED;
+    bus.servos[i].kAngleReal2Raw = FSUS_K_ANGLE_REAL2RAW;
+    bus.servos[i].bAngleReal2Raw = FSUS_B_ANGLE_REAL2RAW;
+    bus.online[i] = false;
+  }
+}
+
+static void refreshConfiguredServos(ServoBus &bus) {
+  for (uint8_t i = 0; i < CONFIGURED_SERVO_COUNT; ++i) {
+    bus.online[i] = initServo(bus, bus.servos[i]);
+  }
 }
 
 static bool anyConfiguredServoOnline() {
-  return servo0Online || servo1Online || servo2Online;
+  for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
+    for (uint8_t i = 0; i < CONFIGURED_SERVO_COUNT; ++i) {
+      if (servoBuses[busIndex].online[i]) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
-static void setServoAngle(FSUS_Servo &servo, bool online, float angle) {
-  if (!online) {
+static bool shouldCommandServo(bool online) {
+  return !ENABLE_SERVO_DETECTION || online;
+}
+
+static void setServoAngle(ServoBus &bus, FSUS_Servo &servo, bool online,
+                          float angle) {
+  if (!shouldCommandServo(online)) {
     return;
   }
 
-  logPrintf("Set servo #%u raw angle = %.1f deg\r\n", servo.servoId, angle);
+  logPrintf("Set bus %s servo #%u raw angle = %.1f deg\r\n", bus.name,
+            servo.servoId, angle);
   servo.setRawAngleByInterval(angle, 1000, 100, 100, 0);
 }
 
-static void reportServoAngle(FSUS_Servo &servo, bool online) {
-  if (!online) {
+static void reportServoAngle(ServoBus &bus, FSUS_Servo &servo, bool online) {
+  if (!ENABLE_SERVO_DETECTION || !online) {
     return;
   }
 
   const float currentAngle = servo.queryRawAngle();
-  logPrintf("servo #%u current raw angle = %.1f deg, status=%s\r\n",
-            servo.servoId, currentAngle,
-            statusName(protocol.responsePack.recv_status));
+  logPrintf("bus %s servo #%u current raw angle = %.1f deg, status=%s\r\n",
+            bus.name, servo.servoId, currentAngle,
+            statusName(bus.protocol->responsePack.recv_status));
 }
 
-static void moveAllAndReport(float servo0Angle, float servo1Angle,
-                             float servo2Angle) {
-  setServoAngle(servo0, servo0Online, servo0Angle);
-  setServoAngle(servo1, servo1Online, servo1Angle);
-  setServoAngle(servo2, servo2Online, servo2Angle);
+static void moveAllAndReport(float angle) {
+  for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
+    ServoBus &bus = servoBuses[busIndex];
+    for (uint8_t i = 0; i < CONFIGURED_SERVO_COUNT; ++i) {
+      setServoAngle(bus, bus.servos[i], bus.online[i], angle);
+    }
+  }
   delay(1200);
 
-  reportServoAngle(servo0, servo0Online);
-  reportServoAngle(servo1, servo1Online);
-  reportServoAngle(servo2, servo2Online);
+  for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
+    ServoBus &bus = servoBuses[busIndex];
+    for (uint8_t i = 0; i < CONFIGURED_SERVO_COUNT; ++i) {
+      reportServoAngle(bus, bus.servos[i], bus.online[i]);
+    }
+  }
 }
 
 void setup() {
@@ -227,43 +290,59 @@ void setup() {
 
   logPrintln();
   logPrintln("FashionStar UART servo test on ESP32-S3");
-  logPrintf("Servo UART: baud=%lu RX=%d TX=%d\r\n", SERVO_BAUDRATE,
-            SERVO_RX_PIN, SERVO_TX_PIN);
+  logPrintf("Servo UART A: baud=%lu RX=%d TX=%d\r\n", SERVO_BAUDRATE,
+            SERVO_A_RX_PIN, SERVO_A_TX_PIN);
+  logPrintf("Servo UART B: baud=%lu RX=%d TX=%d\r\n", SERVO_BAUDRATE,
+            SERVO_B_RX_PIN, SERVO_B_TX_PIN);
 
-  ServoSerial.begin(SERVO_BAUDRATE, SERIAL_8N1, SERVO_RX_PIN, SERVO_TX_PIN);
-  protocol.baudrate = SERVO_BAUDRATE;
-  protocol.serial = &ServoSerial;
+  for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
+    ServoBus &bus = servoBuses[busIndex];
+    bus.serial->begin(SERVO_BAUDRATE, SERIAL_8N1, bus.rxPin, bus.txPin);
+    bus.protocol->baudrate = SERVO_BAUDRATE;
+    bus.protocol->serial = bus.serial;
+  }
   delay(100);
+  for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
+    initConfiguredServoObjects(servoBuses[busIndex]);
+  }
 
   if (SET_ID_MODE) {
-    runIdSettingMode();
+    runIdSettingMode(servoBuses[0]);
     while (true) {
       delay(1000);
     }
   }
 
-  scanServos();
-  refreshConfiguredServos();
+  if (ENABLE_SERVO_DETECTION) {
+    for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
+      scanServos(servoBuses[busIndex]);
+      refreshConfiguredServos(servoBuses[busIndex]);
+    }
+  } else {
+    logPrintln("Servo detection disabled. Entering loop directly.");
+  }
 }
 
 void loop() {
   static uint32_t lastRetryMs = 0;
 
-  if (!anyConfiguredServoOnline()) {
+  if (ENABLE_SERVO_DETECTION && !anyConfiguredServoOnline()) {
     if (millis() - lastRetryMs >= 3000) {
       lastRetryMs = millis();
       logPrintln();
       logPrintln("No configured servos online. Rescanning...");
-      scanServos();
-      refreshConfiguredServos();
+      for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
+        scanServos(servoBuses[busIndex]);
+        refreshConfiguredServos(servoBuses[busIndex]);
+      }
     }
     delay(100);
     return;
   }
 
-  moveAllAndReport(45.0f, 90.0f, 180.0f);
+  moveAllAndReport(-90.0f);
   delay(1000);
 
-  moveAllAndReport(-45.0f, -90.0f, -180.0f);
+  moveAllAndReport(90.0f);
   delay(1000);
 }
