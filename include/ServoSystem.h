@@ -3,6 +3,10 @@
 
 #include <Arduino.h>
 
+static constexpr uint8_t SERVO_BUS_A = 0;
+static constexpr uint8_t SERVO_BUS_B = 1;
+static constexpr uint8_t SERVO_BUS_ALL = 255;
+
 struct JointTarget {
   uint8_t busIndex;
   uint8_t servoId;

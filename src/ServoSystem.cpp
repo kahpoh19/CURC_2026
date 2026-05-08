@@ -332,7 +332,7 @@ void applyTargets(const JointTarget *targets, uint8_t count,
                   uint16_t intervalMs) {
   for (uint8_t i = 0; i < count; ++i) {
     const JointTarget &target = targets[i];
-    if (target.busIndex >= SERVO_BUS_COUNT) {
+    if (target.busIndex != SERVO_BUS_ALL && target.busIndex >= SERVO_BUS_COUNT) {
       logPrintf("Invalid target bus index %u\r\n", target.busIndex);
       continue;
     }
@@ -343,9 +343,17 @@ void applyTargets(const JointTarget *targets, uint8_t count,
       continue;
     }
 
-    ServoBus &bus = servoBuses[target.busIndex];
-    setServoAngle(bus, bus.servos[servoIndex], bus.online[servoIndex],
-                  target.rawAngle, intervalMs);
+    if (target.busIndex == SERVO_BUS_ALL) {
+      for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
+        ServoBus &bus = servoBuses[busIndex];
+        setServoAngle(bus, bus.servos[servoIndex], bus.online[servoIndex],
+                      target.rawAngle, intervalMs);
+      }
+    } else {
+      ServoBus &bus = servoBuses[target.busIndex];
+      setServoAngle(bus, bus.servos[servoIndex], bus.online[servoIndex],
+                    target.rawAngle, intervalMs);
+    }
   }
 
   delay(intervalMs + 20);
