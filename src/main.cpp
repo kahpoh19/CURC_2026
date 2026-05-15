@@ -17,8 +17,7 @@ static void runServoSweepTest() {
 
 static void handleRemoteLoss() {
   if (remoteHadSignal) {
-    logPrintln("PPM remote signal lost. Returning to stand pose.");
-    applyStandPose();
+    logPrintln("Remote signal lost. Waiting for Start.");
     remoteHadSignal = false;
     resetMotionState();
   }
@@ -30,10 +29,9 @@ static void handleRemoteAcquire() {
     return;
   }
 
-  logPrintln("PPM remote signal acquired.");
+  logPrintln("Remote signal acquired.");
   remoteHadSignal = true;
   resetMotionState();
-  applyStandPose();
 }
 
 void setup() {
@@ -43,14 +41,18 @@ void setup() {
   delay(200);
 
   logPrintln();
-  setupServoSystem();
+  logPrintf("Remote backend selected: %s\r\n", remoteBackendName());
 
   if (isRemoteControlEnabled()) {
     initRemoteReceiver();
-    applyStandPose();
+  }
+
+  setupServoSystem();
+
+  if (isRemoteControlEnabled()) {
     logPrintln(
-        "Remote map: ch2 walk, ch4 turn, ch5 low/high left/right punch, "
-        "ch6 low/center/high stand/stand/guard.");
+        "Remote map: Start stand, Select unload, D-pad/left stick four-way "
+        "walk, right stick horizontal turn, LB/RB punch, LT/RT hook.");
   }
 }
 

@@ -328,6 +328,19 @@ void moveAllAndReport(float angle) {
   }
 }
 
+void unloadAllServos() {
+  logPrintln("Servo unload: all configured servos");
+  for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
+    ServoBus &bus = servoBuses[busIndex];
+    for (uint8_t i = 0; i < CONFIGURED_SERVO_COUNT; ++i) {
+      if (!shouldCommandServo(bus.online[i])) {
+        continue;
+      }
+      bus.servos[i].StopOnControlUnloading();
+    }
+  }
+}
+
 void applyTargets(const JointTarget *targets, uint8_t count,
                   uint16_t intervalMs) {
   for (uint8_t i = 0; i < count; ++i) {

@@ -17,6 +17,7 @@ bool isServoDetectionEnabled();
 void setupServoSystem();
 bool serviceServoDetection();
 void moveAllAndReport(float angle);
+void unloadAllServos();
 void applyTargets(const JointTarget *targets, uint8_t count,
                   uint16_t intervalMs);
 

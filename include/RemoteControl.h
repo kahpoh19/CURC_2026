@@ -5,22 +5,30 @@
 
 static constexpr bool ENABLE_REMOTE_CONTROL = true;
 
-static constexpr int REMOTE_PPM_PIN = 2;
+#define REMOTE_BACKEND_USB_HOST 1
+
+#ifndef REMOTE_INPUT_BACKEND
+#define REMOTE_INPUT_BACKEND REMOTE_BACKEND_USB_HOST
+#endif
+
 static constexpr uint8_t REMOTE_CHANNEL_COUNT = 10;
-static constexpr uint16_t REMOTE_SYNC_GAP_US = 3000;
 static constexpr uint16_t REMOTE_MIN_PULSE_US = 900;
 static constexpr uint16_t REMOTE_MAX_PULSE_US = 2100;
 static constexpr uint16_t REMOTE_CENTER_US =
     (REMOTE_MIN_PULSE_US + REMOTE_MAX_PULSE_US) / 2;
 static constexpr uint16_t REMOTE_DEADZONE_US = 100;
-static constexpr uint32_t REMOTE_FAILSAFE_US = 350000;
+static constexpr uint32_t REMOTE_FAILSAFE_US = 600000;
 static constexpr uint32_t REMOTE_CONTROL_PERIOD_MS = 20;
 
-// Channel indexes follow the PPM order used by IS_Robot2025.
+// The motion layer still consumes pulse-like channels so USB reports can reuse
+// the walking and action code without touching Motions.cpp.
 static constexpr uint8_t REMOTE_WALK_CHANNEL = 1;
+static constexpr uint8_t REMOTE_STRAFE_CHANNEL = 2;
 static constexpr uint8_t REMOTE_TURN_CHANNEL = 3;
 static constexpr uint8_t REMOTE_PUNCH_CHANNEL = 4;
 static constexpr uint8_t REMOTE_MODE_CHANNEL = 5;
+static constexpr uint8_t REMOTE_SYSTEM_CHANNEL = 6;
+static constexpr uint8_t REMOTE_HOOK_CHANNEL = 7;
 
 static constexpr uint16_t SWITCH_LOW_MIN_US = 900;
 static constexpr uint16_t SWITCH_LOW_MAX_US = 1150;
@@ -33,6 +41,8 @@ enum MotionCommand {
   MOTION_IDLE,
   MOTION_WALK_FORWARD,
   MOTION_WALK_BACKWARD,
+  MOTION_WALK_LEFT,
+  MOTION_WALK_RIGHT,
   MOTION_TURN_LEFT,
   MOTION_TURN_RIGHT,
 };
@@ -44,6 +54,7 @@ struct RemoteSnapshot {
 };
 
 bool isRemoteControlEnabled();
+const char *remoteBackendName();
 void initRemoteReceiver();
 RemoteSnapshot readRemoteSnapshot();
 void reportRemoteSnapshot(const RemoteSnapshot &snapshot);
