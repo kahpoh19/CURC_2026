@@ -5,392 +5,383 @@
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
-static constexpr uint16_t STAND_INTERVAL_MS = 350;
-static constexpr uint16_t WALK_INTERVAL_MS = 320;
-static constexpr uint16_t PUNCH_INTERVAL_MS = 220;
-static constexpr uint32_t WALK_STEP_INTERVAL_MS = WALK_INTERVAL_MS;
-
-// If the robot loads the wrong foot before swinging, flip this between 1.0 and
-// -1.0 before changing the actual gait angles below.
-static constexpr float WALK_BALANCE_SIGN = -1.0f;
-
-static constexpr float HIP_OPEN_NEUTRAL_DEG = 0.0f;
-static constexpr float WALK_SWING_KNEE_LIFT_DEG = -34.0f;
-static constexpr float WALK_SWING_ANKLE_FORWARD_DEG = 30.0f;
-static constexpr float WALK_SUPPORT_KNEE_BEND_DEG = 0.0f;
-static constexpr float WALK_SUPPORT_ANKLE_PUSH_DEG = 0.0f;
-static constexpr float WALK_FOOT_ROLL_SHIFT_DEG = 15.0f;
-static constexpr float WALK_WAIST_SWING_DEG = 4.0f;
-static constexpr float WALK_ARM_SWING_DEG = 12.0f;
-static constexpr float SIDE_STEP_HIP_OPEN_DEG = 10.0f;
-static constexpr float SIDE_STEP_FOOT_ROLL_DEG = 12.0f;
-static constexpr float SIDE_STEP_WAIST_DEG = 5.0f;
-
 static constexpr uint8_t BUS_ANY = SERVO_BUS_ALL;
+static constexpr uint8_t MAX_FRAME_TARGETS = 17;
+static constexpr uint16_t TURN_REPEAT_PAUSE_MS = 200;
 
-// Real humanoid servo ID map.
-static constexpr uint8_t SERVO_LEFT_ARM_BOTTOM = 0;
-static constexpr uint8_t SERVO_LEFT_ARM_MIDDLE = 1;
-static constexpr uint8_t SERVO_LEFT_ARM_TOP = 2;
-static constexpr uint8_t SERVO_LEFT_SHOULDER = 3;
-static constexpr uint8_t SERVO_RIGHT_SHOULDER = 4;
-static constexpr uint8_t SERVO_RIGHT_ARM_BOTTOM = 5;
-static constexpr uint8_t SERVO_RIGHT_ARM_MIDDLE = 6;
-static constexpr uint8_t SERVO_RIGHT_ARM_TOP = 7;
-static constexpr uint8_t SERVO_LEFT_HIP_OPEN = 8;
-static constexpr uint8_t SERVO_RIGHT_HIP_OPEN = 9;
-static constexpr uint8_t SERVO_LEFT_KNEE = 10;
-static constexpr uint8_t SERVO_LEFT_ANKLE_PITCH = 11;
-static constexpr uint8_t SERVO_LEFT_FOOT_ROLL = 12;
-static constexpr uint8_t SERVO_RIGHT_KNEE = 13;
-static constexpr uint8_t SERVO_RIGHT_ANKLE_PITCH = 14;
-static constexpr uint8_t SERVO_RIGHT_FOOT_ROLL = 15;
-static constexpr uint8_t SERVO_WAIST_CENTER = 16;
+struct ServoAngle {
+  uint8_t servoId;
+  float rawAngle;
+};
 
-static bool standPoseApplied = false;
+struct MotionFrame {
+  const ServoAngle *targets;
+  uint8_t targetCount;
+  uint16_t moveMs;
+  uint16_t delayMs;
+};
+
+static bool idlePoseApplied = false;
 static bool motionArmed = false;
-static uint32_t lastWalkStepMs = 0;
-static uint8_t walkPhase = 0;
-static MotionCommand lastMotionCommand = MOTION_IDLE;
+static bool returnToStandPending = false;
 
-static constexpr JointTarget STAND_POSE[] = {
-    {BUS_ANY, SERVO_LEFT_ARM_BOTTOM, 0.0f},
-    {BUS_ANY, SERVO_LEFT_ARM_MIDDLE, 12.0f},
-    {BUS_ANY, SERVO_LEFT_ARM_TOP, 0.0f},
-    {BUS_ANY, SERVO_LEFT_SHOULDER, 8.0f},
-    {BUS_ANY, SERVO_RIGHT_SHOULDER, -8.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_BOTTOM, 0.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_MIDDLE, -12.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_TOP, 0.0f},
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, 0.0f},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, 0.0f},
-    {BUS_ANY, SERVO_LEFT_KNEE, 0.0f},
-    {BUS_ANY, SERVO_LEFT_ANKLE_PITCH, 0.0f},
-    {BUS_ANY, SERVO_LEFT_FOOT_ROLL, 0.0f},
-    {BUS_ANY, SERVO_RIGHT_KNEE, 0.0f},
-    {BUS_ANY, SERVO_RIGHT_ANKLE_PITCH, 0.0f},
-    {BUS_ANY, SERVO_RIGHT_FOOT_ROLL, 0.0f},
-    {BUS_ANY, SERVO_WAIST_CENTER, 0.0f},
+// Tune motions by editing {servo id, angle}. moveMs is JSON time; delayMs is JSON delay.
+
+static constexpr ServoAngle STAND_FRAME_0[] = {
+    {0, -30.0f}, {1, 0.0f}, {2, -30.0f}, {3, 10.0f},
+    {4, -10.0f}, {5, 30.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 10.0f}, {9, -10.0f}, {10, 55.0f}, {11, -35.0f},
+    {12, 10.0f}, {13, -55.0f}, {14, 35.0f}, {15, -10.0f},
+    {16, 0.0f},
+};
+static constexpr MotionFrame STAND_MOTION[] = {
+    {STAND_FRAME_0, ARRAY_COUNT(STAND_FRAME_0), 500, 0},
 };
 
-static constexpr JointTarget GUARD_POSE[] = {
-    {BUS_ANY, SERVO_LEFT_ARM_BOTTOM, 0.0f},
-    {BUS_ANY, SERVO_LEFT_ARM_MIDDLE, 42.0f},
-    {BUS_ANY, SERVO_LEFT_ARM_TOP, 28.0f},
-    {BUS_ANY, SERVO_LEFT_SHOULDER, 10.0f},
-    {BUS_ANY, SERVO_RIGHT_SHOULDER, -10.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_BOTTOM, 0.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_MIDDLE, -42.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_TOP, 28.0f},
+static constexpr ServoAngle SQUAD_FRAME_0[] = {
+    {0, -30.0f}, {1, 12.7f}, {2, -56.8f}, {3, -1.6f},
+    {4, 7.8f}, {5, 35.0f}, {6, -12.6f}, {7, 45.4f},
+    {8, -0.1f}, {9, -4.6f}, {10, 97.7f}, {11, -86.7f},
+    {12, -3.5f}, {13, -93.6f}, {14, 83.1f}, {15, -5.5f},
+    {16, -1.0f},
+};
+static constexpr MotionFrame SQUAD_MOTION[] = {
+    {SQUAD_FRAME_0, ARRAY_COUNT(SQUAD_FRAME_0), 300, 0},
 };
 
-static constexpr JointTarget LEFT_PUNCH_EXTEND[] = {
-    {BUS_ANY, SERVO_LEFT_ARM_BOTTOM, 0.0f},
-    {BUS_ANY, SERVO_LEFT_ARM_MIDDLE, 0.0f},
-    {BUS_ANY, SERVO_LEFT_ARM_TOP, 64.0f},
-    {BUS_ANY, SERVO_LEFT_SHOULDER, 4.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_MIDDLE, -48.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_TOP, 18.0f},
+static constexpr ServoAngle FORWARD_FRAME_0[] = {
+    {0, -44.0f}, {1, 0.0f}, {2, -30.0f}, {3, -30.0f},
+    {4, -20.0f}, {5, 30.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 12.0f}, {9, -12.0f}, {10, 35.0f}, {11, -41.0f},
+    {12, 5.5f}, {13, -60.0f}, {14, 25.0f}, {15, -9.0f},
+    {16, -10.0f},
+};
+static constexpr ServoAngle FORWARD_FRAME_1[] = {
+    {0, -44.0f}, {1, 0.0f}, {2, -30.0f}, {3, 0.0f},
+    {4, 0.0f}, {5, 30.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 17.0f}, {9, -17.0f}, {10, 47.0f}, {11, -27.0f},
+    {12, 9.5f}, {13, -47.0f}, {14, 27.0f}, {15, -14.0f},
+    {16, 0.0f},
+};
+static constexpr ServoAngle FORWARD_FRAME_2[] = {
+    {0, -44.0f}, {1, 0.0f}, {2, -30.0f}, {3, 30.0f},
+    {4, 20.0f}, {5, 30.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 12.0f}, {9, -12.0f}, {10, 60.0f}, {11, -25.0f},
+    {12, 9.0f}, {13, -35.0f}, {14, 41.0f}, {15, -5.5f},
+    {16, 10.0f},
+};
+static constexpr ServoAngle FORWARD_FRAME_3[] = {
+    {0, -44.0f}, {1, 0.0f}, {2, -30.0f}, {3, 0.0f},
+    {4, 0.0f}, {5, 30.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 17.0f}, {9, -17.0f}, {10, 47.5f}, {11, -27.7f},
+    {12, 10.0f}, {13, -47.7f}, {14, 27.5f}, {15, -18.5f},
+    {16, 0.0f},
+};
+static constexpr MotionFrame FORWARD_MOTION[] = {
+    {FORWARD_FRAME_0, ARRAY_COUNT(FORWARD_FRAME_0), 200, 0},
+    {FORWARD_FRAME_1, ARRAY_COUNT(FORWARD_FRAME_1), 200, 0},
+    {FORWARD_FRAME_2, ARRAY_COUNT(FORWARD_FRAME_2), 200, 0},
+    {FORWARD_FRAME_3, ARRAY_COUNT(FORWARD_FRAME_3), 200, 0},
 };
 
-static constexpr JointTarget RIGHT_PUNCH_EXTEND[] = {
-    {BUS_ANY, SERVO_RIGHT_SHOULDER, -4.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_BOTTOM, 0.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_MIDDLE, 0.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_TOP, 64.0f},
-    {BUS_ANY, SERVO_LEFT_ARM_MIDDLE, 48.0f},
-    {BUS_ANY, SERVO_LEFT_ARM_TOP, 18.0f},
+static constexpr ServoAngle BACKWARD_FRAME_0[] = {
+    {0, -30.0f}, {1, 0.0f}, {2, -40.0f}, {3, 10.0f},
+    {4, 10.0f}, {5, 30.0f}, {6, 0.0f}, {7, 40.0f},
+    {8, 11.0f}, {9, -11.0f}, {10, 58.0f}, {11, -37.0f},
+    {12, 4.0f}, {13, -28.0f}, {14, 75.0f}, {15, -8.0f},
+    {16, -10.0f},
+};
+static constexpr ServoAngle BACKWARD_FRAME_1[] = {
+    {0, -30.0f}, {1, 0.0f}, {2, -40.0f}, {3, 20.0f},
+    {4, 20.0f}, {5, 30.0f}, {6, 0.0f}, {7, 40.0f},
+    {8, 11.0f}, {9, -11.0f}, {10, 76.0f}, {11, -37.0f},
+    {12, 6.5f}, {13, -29.0f}, {14, 75.0f}, {15, -6.5f},
+    {16, -5.0f},
+};
+static constexpr ServoAngle BACKWARD_FRAME_2[] = {
+    {0, -30.0f}, {1, 0.0f}, {2, -40.0f}, {3, 10.0f},
+    {4, 10.0f}, {5, 30.0f}, {6, 0.0f}, {7, 40.0f},
+    {8, 11.0f}, {9, -11.0f}, {10, 52.0f}, {11, -56.0f},
+    {12, 7.2f}, {13, -43.5f}, {14, 56.0f}, {15, -5.2f},
+    {16, 0.0f},
+};
+static constexpr ServoAngle BACKWARD_FRAME_3[] = {
+    {0, -30.0f}, {1, 0.0f}, {2, -40.0f}, {3, 0.0f},
+    {4, 0.0f}, {5, 30.0f}, {6, 0.0f}, {7, 40.0f},
+    {8, 11.0f}, {9, -11.0f}, {10, 28.0f}, {11, -75.0f},
+    {12, 8.0f}, {13, -58.0f}, {14, 37.0f}, {15, -4.0f},
+    {16, 5.0f},
+};
+static constexpr ServoAngle BACKWARD_FRAME_4[] = {
+    {0, -30.0f}, {1, 0.0f}, {2, -40.0f}, {3, -10.0f},
+    {4, -10.0f}, {5, 30.0f}, {6, 0.0f}, {7, 40.0f},
+    {8, 11.0f}, {9, -11.0f}, {10, 29.0f}, {11, -75.0f},
+    {12, 6.5f}, {13, -76.0f}, {14, 37.0f}, {15, -6.5f},
+    {16, 10.0f},
+};
+static constexpr ServoAngle BACKWARD_FRAME_5[] = {
+    {0, -30.0f}, {1, 0.0f}, {2, -40.0f}, {3, 10.0f},
+    {4, -10.0f}, {5, 30.0f}, {6, 0.0f}, {7, 40.0f},
+    {8, 14.0f}, {9, -14.0f}, {10, 60.0f}, {11, -50.0f},
+    {12, 10.0f}, {13, -60.0f}, {14, 50.0f}, {15, -10.0f},
+    {16, 0.0f},
+};
+static constexpr MotionFrame BACKWARD_MOTION[] = {
+    {BACKWARD_FRAME_0, ARRAY_COUNT(BACKWARD_FRAME_0), 300, 0},
+    {BACKWARD_FRAME_1, ARRAY_COUNT(BACKWARD_FRAME_1), 300, 0},
+    {BACKWARD_FRAME_2, ARRAY_COUNT(BACKWARD_FRAME_2), 300, 0},
+    {BACKWARD_FRAME_3, ARRAY_COUNT(BACKWARD_FRAME_3), 300, 0},
+    {BACKWARD_FRAME_4, ARRAY_COUNT(BACKWARD_FRAME_4), 300, 0},
+    {BACKWARD_FRAME_5, ARRAY_COUNT(BACKWARD_FRAME_5), 300, 0},
 };
 
-static constexpr JointTarget LEFT_HOOK_EXTEND[] = {
-    {BUS_ANY, SERVO_WAIST_CENTER, 22.0f},
-    {BUS_ANY, SERVO_LEFT_SHOULDER, 26.0f},
-    {BUS_ANY, SERVO_LEFT_ARM_BOTTOM, 0.0f},
-    {BUS_ANY, SERVO_LEFT_ARM_MIDDLE, 18.0f},
-    {BUS_ANY, SERVO_LEFT_ARM_TOP, 56.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_MIDDLE, -42.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_TOP, 24.0f},
+static constexpr ServoAngle MOVELEFT_FRAME_0[] = {
+    {0, -45.0f}, {1, 0.0f}, {2, -30.0f}, {3, 0.0f},
+    {4, 0.0f}, {5, 45.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 10.0f}, {9, -10.0f}, {10, 48.0f}, {11, -37.0f},
+    {12, 0.0f}, {13, -53.0f}, {14, 61.0f}, {15, -10.0f},
+    {16, 0.0f},
+};
+static constexpr ServoAngle MOVELEFT_FRAME_1[] = {
+    {0, -32.7f}, {1, 0.0f}, {2, -42.0f}, {3, 0.0f},
+    {4, 0.0f}, {5, 42.7f}, {6, 0.0f}, {7, 44.0f},
+    {8, 12.0f}, {9, 5.0f}, {10, 58.0f}, {11, -64.0f},
+    {12, 7.0f}, {13, -59.0f}, {14, 64.0f}, {15, 4.0f},
+    {16, 0.0f},
+};
+static constexpr ServoAngle MOVELEFT_FRAME_2[] = {
+    {0, -42.7f}, {1, 0.0f}, {2, -44.0f}, {3, 0.0f},
+    {4, 0.0f}, {5, 32.7f}, {6, 0.0f}, {7, 42.0f},
+    {8, -5.0f}, {9, -12.0f}, {10, 59.0f}, {11, -64.0f},
+    {12, -4.0f}, {13, -58.0f}, {14, 64.0f}, {15, -7.0f},
+    {16, 0.0f},
+};
+static constexpr ServoAngle MOVELEFT_FRAME_3[] = {
+    {0, -42.7f}, {1, 0.0f}, {2, -44.0f}, {3, 0.0f},
+    {4, 0.0f}, {5, 32.7f}, {6, 0.0f}, {7, 42.0f},
+    {8, 0.0f}, {9, -12.0f}, {10, 50.0f}, {11, -55.0f},
+    {12, -4.0f}, {13, -50.0f}, {14, 55.0f}, {15, -7.0f},
+    {16, 0.0f},
+};
+static constexpr ServoAngle MOVELEFT_FRAME_4[] = {
+    {0, -30.0f}, {1, 0.0f}, {2, -30.0f}, {3, 10.0f},
+    {4, -10.0f}, {5, 30.0f}, {6, 0.0f}, {7, 20.0f},
+    {8, 25.0f}, {9, -25.0f}, {10, 45.0f}, {11, -50.0f},
+    {12, 10.0f}, {13, -45.0f}, {14, 50.0f}, {15, -10.0f},
+    {16, 0.0f},
+};
+static constexpr MotionFrame MOVELEFT_MOTION[] = {
+    {MOVELEFT_FRAME_0, ARRAY_COUNT(MOVELEFT_FRAME_0), 200, 0},
+    {MOVELEFT_FRAME_1, ARRAY_COUNT(MOVELEFT_FRAME_1), 200, 0},
+    {MOVELEFT_FRAME_2, ARRAY_COUNT(MOVELEFT_FRAME_2), 200, 0},
+    {MOVELEFT_FRAME_3, ARRAY_COUNT(MOVELEFT_FRAME_3), 200, 0},
+    {MOVELEFT_FRAME_4, ARRAY_COUNT(MOVELEFT_FRAME_4), 500, 0},
 };
 
-static constexpr JointTarget RIGHT_HOOK_EXTEND[] = {
-    {BUS_ANY, SERVO_WAIST_CENTER, -22.0f},
-    {BUS_ANY, SERVO_RIGHT_SHOULDER, -26.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_BOTTOM, 0.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_MIDDLE, -18.0f},
-    {BUS_ANY, SERVO_RIGHT_ARM_TOP, 56.0f},
-    {BUS_ANY, SERVO_LEFT_ARM_MIDDLE, 42.0f},
-    {BUS_ANY, SERVO_LEFT_ARM_TOP, 24.0f},
+static constexpr ServoAngle MOVERIGHT_FRAME_0[] = {
+    {0, -45.0f}, {1, 0.0f}, {2, -30.0f}, {3, 0.0f},
+    {4, 0.0f}, {5, 45.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 10.0f}, {9, -10.0f}, {10, 53.0f}, {11, -61.0f},
+    {12, 10.0f}, {13, -48.0f}, {14, 37.0f}, {15, 0.0f},
+    {16, 0.0f},
+};
+static constexpr ServoAngle MOVERIGHT_FRAME_1[] = {
+    {0, -42.7f}, {1, 0.0f}, {2, -44.0f}, {3, 0.0f},
+    {4, 0.0f}, {5, 32.7f}, {6, 0.0f}, {7, 42.0f},
+    {8, -5.0f}, {9, -12.0f}, {10, 59.0f}, {11, -64.0f},
+    {12, -4.0f}, {13, -58.0f}, {14, 64.0f}, {15, -7.0f},
+    {16, 0.0f},
+};
+static constexpr ServoAngle MOVERIGHT_FRAME_2[] = {
+    {0, -32.7f}, {1, 0.0f}, {2, -42.0f}, {3, 0.0f},
+    {4, 0.0f}, {5, 42.7f}, {6, 0.0f}, {7, 44.0f},
+    {8, 12.0f}, {9, 5.0f}, {10, 58.0f}, {11, -63.0f},
+    {12, 7.0f}, {13, -59.0f}, {14, 64.0f}, {15, 4.0f},
+    {16, 0.0f},
+};
+static constexpr ServoAngle MOVERIGHT_FRAME_3[] = {
+    {0, -32.7f}, {1, 0.0f}, {2, -42.0f}, {3, 0.0f},
+    {4, 0.0f}, {5, 42.7f}, {6, 0.0f}, {7, 44.0f},
+    {8, 12.0f}, {9, 0.0f}, {10, 50.0f}, {11, -55.0f},
+    {12, 7.0f}, {13, -50.0f}, {14, 55.0f}, {15, 4.0f},
+    {16, 0.0f},
+};
+static constexpr ServoAngle MOVERIGHT_FRAME_4[] = {
+    {0, -30.0f}, {1, 0.0f}, {2, -30.0f}, {3, 10.0f},
+    {4, -10.0f}, {5, 30.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 25.0f}, {9, -25.0f}, {10, 45.0f}, {11, -50.0f},
+    {12, 10.0f}, {13, -45.0f}, {14, 50.0f}, {15, -10.0f},
+    {16, 0.0f},
+};
+static constexpr MotionFrame MOVERIGHT_MOTION[] = {
+    {MOVERIGHT_FRAME_0, ARRAY_COUNT(MOVERIGHT_FRAME_0), 200, 0},
+    {MOVERIGHT_FRAME_1, ARRAY_COUNT(MOVERIGHT_FRAME_1), 200, 0},
+    {MOVERIGHT_FRAME_2, ARRAY_COUNT(MOVERIGHT_FRAME_2), 200, 0},
+    {MOVERIGHT_FRAME_3, ARRAY_COUNT(MOVERIGHT_FRAME_3), 200, 0},
+    {MOVERIGHT_FRAME_4, ARRAY_COUNT(MOVERIGHT_FRAME_4), 500, 0},
 };
 
-static constexpr JointTarget WALK_FORWARD_SHIFT_RIGHT[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, 0.0f},
-    {BUS_ANY, SERVO_LEFT_ANKLE_PITCH, 0.0f},
-    {BUS_ANY, SERVO_LEFT_FOOT_ROLL,
-     -WALK_BALANCE_SIGN * WALK_FOOT_ROLL_SHIFT_DEG},
-    {BUS_ANY, SERVO_RIGHT_KNEE, WALK_SUPPORT_KNEE_BEND_DEG},
-    {BUS_ANY, SERVO_RIGHT_ANKLE_PITCH, WALK_SUPPORT_ANKLE_PUSH_DEG},
-    {BUS_ANY, SERVO_RIGHT_FOOT_ROLL,
-     WALK_BALANCE_SIGN * WALK_FOOT_ROLL_SHIFT_DEG},
-    {BUS_ANY, SERVO_WAIST_CENTER, -WALK_WAIST_SWING_DEG},
+static constexpr ServoAngle ROTATELEFT_FRAME_0[] = {
+    {0, 0.0f}, {1, 0.0f}, {2, -30.0f}, {3, 40.0f},
+    {4, 30.0f}, {5, 45.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 15.0f}, {9, -20.0f}, {10, 35.0f}, {11, -35.0f},
+    {12, 10.0f}, {13, -55.0f}, {14, 55.0f}, {15, -12.0f},
+    {16, 0.0f},
+};
+static constexpr ServoAngle ROTATELEFT_FRAME_1[] = {
+    {0, 0.0f}, {1, 0.0f}, {2, -30.0f}, {3, 20.0f},
+    {4, 40.0f}, {5, 0.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 15.0f}, {9, -20.0f}, {10, 38.0f}, {11, -36.0f},
+    {12, 12.0f}, {13, -54.0f}, {14, 55.0f}, {15, -14.0f},
+    {16, 24.0f},
+};
+static constexpr ServoAngle ROTATELEFT_FRAME_2[] = {
+    {0, 0.0f}, {1, 0.0f}, {2, -30.0f}, {3, 30.0f},
+    {4, 30.0f}, {5, 0.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 15.0f}, {9, -20.0f}, {10, 35.0f}, {11, -33.0f},
+    {12, 10.0f}, {13, -57.0f}, {14, 58.0f}, {15, -12.0f},
+    {16, 34.5f},
+};
+static constexpr ServoAngle ROTATELEFT_FRAME_3[] = {
+    {0, -45.0f}, {1, 0.0f}, {2, -30.0f}, {3, 10.0f},
+    {4, 40.0f}, {5, 0.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 15.0f}, {9, -20.0f}, {10, 36.0f}, {11, -35.0f},
+    {12, 12.0f}, {13, -57.0f}, {14, 56.0f}, {15, -13.0f},
+    {16, 45.0f},
+};
+static constexpr ServoAngle ROTATELEFT_FRAME_4[] = {
+    {0, -45.0f}, {1, 0.0f}, {2, -30.0f}, {3, 0.0f},
+    {4, 0.0f}, {5, 45.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 17.0f}, {9, -17.0f}, {10, 45.0f}, {11, -35.0f},
+    {12, 20.0f}, {13, -45.0f}, {14, 38.0f}, {15, -20.0f},
+    {16, 0.0f},
+};
+static constexpr MotionFrame ROTATELEFT_MOTION[] = {
+    {ROTATELEFT_FRAME_0, ARRAY_COUNT(ROTATELEFT_FRAME_0), 200, 0},
+    {ROTATELEFT_FRAME_1, ARRAY_COUNT(ROTATELEFT_FRAME_1), 200, 0},
+    {ROTATELEFT_FRAME_2, ARRAY_COUNT(ROTATELEFT_FRAME_2), 200, 0},
+    {ROTATELEFT_FRAME_3, ARRAY_COUNT(ROTATELEFT_FRAME_3), 200, 0},
+    {ROTATELEFT_FRAME_4, ARRAY_COUNT(ROTATELEFT_FRAME_4), 200,
+     TURN_REPEAT_PAUSE_MS},
 };
 
-static constexpr JointTarget WALK_FORWARD_LEFT_SWING[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, WALK_SWING_KNEE_LIFT_DEG},
-    {BUS_ANY, SERVO_LEFT_ANKLE_PITCH, WALK_SWING_ANKLE_FORWARD_DEG},
-    {BUS_ANY, SERVO_LEFT_FOOT_ROLL,
-     -WALK_BALANCE_SIGN * WALK_FOOT_ROLL_SHIFT_DEG},
-    {BUS_ANY, SERVO_RIGHT_KNEE, WALK_SUPPORT_KNEE_BEND_DEG},
-    {BUS_ANY, SERVO_RIGHT_ANKLE_PITCH, WALK_SUPPORT_ANKLE_PUSH_DEG},
-    {BUS_ANY, SERVO_RIGHT_FOOT_ROLL,
-     WALK_BALANCE_SIGN * WALK_FOOT_ROLL_SHIFT_DEG},
-    {BUS_ANY, SERVO_WAIST_CENTER, -WALK_WAIST_SWING_DEG},
-    {BUS_ANY, SERVO_LEFT_ARM_TOP, -WALK_ARM_SWING_DEG},
-    {BUS_ANY, SERVO_RIGHT_ARM_TOP, WALK_ARM_SWING_DEG},
+static constexpr ServoAngle ROTATERIGHT_FRAME_0[] = {
+    {0, -25.0f}, {1, 0.0f}, {2, -30.0f}, {3, -30.0f},
+    {4, -30.0f}, {5, 0.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 20.0f}, {9, -15.0f}, {10, 55.0f}, {11, -55.0f},
+    {12, 12.0f}, {13, -35.0f}, {14, 35.0f}, {15, -5.0f},
+    {16, 0.0f},
+};
+static constexpr ServoAngle ROTATERIGHT_FRAME_1[] = {
+    {0, -25.0f}, {1, 0.0f}, {2, -30.0f}, {3, -20.0f},
+    {4, -20.0f}, {5, 0.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 20.0f}, {9, -15.0f}, {10, 52.0f}, {11, -52.0f},
+    {12, 13.0f}, {13, -38.0f}, {14, 38.0f}, {15, -7.0f},
+    {16, -24.0f},
+};
+static constexpr ServoAngle ROTATERIGHT_FRAME_2[] = {
+    {0, -25.0f}, {1, 0.0f}, {2, -30.0f}, {3, -30.0f},
+    {4, -30.0f}, {5, 0.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 20.0f}, {9, -15.0f}, {10, 55.0f}, {11, -55.0f},
+    {12, 12.0f}, {13, -35.0f}, {14, 35.0f}, {15, -5.0f},
+    {16, -48.0f},
+};
+static constexpr ServoAngle ROTATERIGHT_FRAME_3[] = {
+    {0, -40.0f}, {1, 0.0f}, {2, -30.0f}, {3, -10.0f},
+    {4, -10.0f}, {5, 22.5f}, {6, 0.0f}, {7, 30.0f},
+    {8, 20.0f}, {9, -15.0f}, {10, 54.0f}, {11, -53.0f},
+    {12, 12.8f}, {13, -36.0f}, {14, 37.0f}, {15, -6.5f},
+    {16, -54.0f},
+};
+static constexpr ServoAngle ROTATERIGHT_FRAME_4[] = {
+    {0, -25.0f}, {1, 0.0f}, {2, -30.0f}, {3, 0.0f},
+    {4, 0.0f}, {5, 45.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 20.0f}, {9, -15.0f}, {10, 40.0f}, {11, -40.0f},
+    {12, 20.0f}, {13, -40.0f}, {14, 35.0f}, {15, -20.0f},
+    {16, 0.0f},
+};
+static constexpr MotionFrame ROTATERIGHT_MOTION[] = {
+    {ROTATERIGHT_FRAME_0, ARRAY_COUNT(ROTATERIGHT_FRAME_0), 200, 0},
+    {ROTATERIGHT_FRAME_1, ARRAY_COUNT(ROTATERIGHT_FRAME_1), 200, 0},
+    {ROTATERIGHT_FRAME_2, ARRAY_COUNT(ROTATERIGHT_FRAME_2), 200, 0},
+    {ROTATERIGHT_FRAME_3, ARRAY_COUNT(ROTATERIGHT_FRAME_3), 200, 0},
+    {ROTATERIGHT_FRAME_4, ARRAY_COUNT(ROTATERIGHT_FRAME_4), 200,
+     TURN_REPEAT_PAUSE_MS},
 };
 
-static constexpr JointTarget WALK_FORWARD_SHIFT_LEFT[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, WALK_SUPPORT_KNEE_BEND_DEG},
-    {BUS_ANY, SERVO_LEFT_ANKLE_PITCH, WALK_SUPPORT_ANKLE_PUSH_DEG},
-    {BUS_ANY, SERVO_LEFT_FOOT_ROLL,
-     -WALK_BALANCE_SIGN * WALK_FOOT_ROLL_SHIFT_DEG},
-    {BUS_ANY, SERVO_RIGHT_KNEE, 0.0f},
-    {BUS_ANY, SERVO_RIGHT_ANKLE_PITCH, 0.0f},
-    {BUS_ANY, SERVO_RIGHT_FOOT_ROLL,
-     WALK_BALANCE_SIGN * WALK_FOOT_ROLL_SHIFT_DEG},
-    {BUS_ANY, SERVO_WAIST_CENTER, WALK_WAIST_SWING_DEG},
-};
-
-static constexpr JointTarget WALK_FORWARD_RIGHT_SWING[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, WALK_SUPPORT_KNEE_BEND_DEG},
-    {BUS_ANY, SERVO_LEFT_ANKLE_PITCH, WALK_SUPPORT_ANKLE_PUSH_DEG},
-    {BUS_ANY, SERVO_LEFT_FOOT_ROLL,
-     -WALK_BALANCE_SIGN * WALK_FOOT_ROLL_SHIFT_DEG},
-    {BUS_ANY, SERVO_RIGHT_KNEE, WALK_SWING_KNEE_LIFT_DEG},
-    {BUS_ANY, SERVO_RIGHT_ANKLE_PITCH, WALK_SWING_ANKLE_FORWARD_DEG},
-    {BUS_ANY, SERVO_RIGHT_FOOT_ROLL,
-     WALK_BALANCE_SIGN * WALK_FOOT_ROLL_SHIFT_DEG},
-    {BUS_ANY, SERVO_WAIST_CENTER, WALK_WAIST_SWING_DEG},
-    {BUS_ANY, SERVO_LEFT_ARM_TOP, WALK_ARM_SWING_DEG},
-    {BUS_ANY, SERVO_RIGHT_ARM_TOP, -WALK_ARM_SWING_DEG},
-};
-
-static constexpr JointTarget WALK_BACKWARD_PHASE_A[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, -20.0f},
-    {BUS_ANY, SERVO_LEFT_ANKLE_PITCH, 16.0f},
-    {BUS_ANY, SERVO_LEFT_FOOT_ROLL, -10.0f},
-    {BUS_ANY, SERVO_RIGHT_KNEE, 18.0f},
-    {BUS_ANY, SERVO_RIGHT_ANKLE_PITCH, -21.0f},
-    {BUS_ANY, SERVO_RIGHT_FOOT_ROLL, 8.0f},
-};
-
-static constexpr JointTarget WALK_BACKWARD_PHASE_B[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, 18.0f},
-    {BUS_ANY, SERVO_LEFT_ANKLE_PITCH, -21.0f},
-    {BUS_ANY, SERVO_LEFT_FOOT_ROLL, 8.0f},
-    {BUS_ANY, SERVO_RIGHT_KNEE, -20.0f},
-    {BUS_ANY, SERVO_RIGHT_ANKLE_PITCH, 16.0f},
-    {BUS_ANY, SERVO_RIGHT_FOOT_ROLL, -10.0f},
-};
-
-static constexpr JointTarget TURN_LEFT_PHASE_A[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, -8.0f},
-    {BUS_ANY, SERVO_RIGHT_KNEE, 8.0f},
-    {BUS_ANY, SERVO_LEFT_ANKLE_PITCH, 8.0f},
-    {BUS_ANY, SERVO_RIGHT_ANKLE_PITCH, -12.0f},
-};
-
-static constexpr JointTarget TURN_LEFT_PHASE_B[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, 8.0f},
-    {BUS_ANY, SERVO_RIGHT_KNEE, -8.0f},
-    {BUS_ANY, SERVO_LEFT_ANKLE_PITCH, -12.0f},
-    {BUS_ANY, SERVO_RIGHT_ANKLE_PITCH, 8.0f},
-};
-
-static constexpr JointTarget TURN_RIGHT_PHASE_A[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, 8.0f},
-    {BUS_ANY, SERVO_RIGHT_KNEE, -8.0f},
-    {BUS_ANY, SERVO_LEFT_ANKLE_PITCH, -12.0f},
-    {BUS_ANY, SERVO_RIGHT_ANKLE_PITCH, 8.0f},
-};
-
-static constexpr JointTarget TURN_RIGHT_PHASE_B[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, HIP_OPEN_NEUTRAL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, -8.0f},
-    {BUS_ANY, SERVO_RIGHT_KNEE, 8.0f},
-    {BUS_ANY, SERVO_LEFT_ANKLE_PITCH, 8.0f},
-    {BUS_ANY, SERVO_RIGHT_ANKLE_PITCH, -12.0f},
-};
-
-static constexpr JointTarget WALK_LEFT_PHASE_A[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, -SIDE_STEP_HIP_OPEN_DEG},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, -SIDE_STEP_HIP_OPEN_DEG * 0.5f},
-    {BUS_ANY, SERVO_LEFT_FOOT_ROLL, -SIDE_STEP_FOOT_ROLL_DEG},
-    {BUS_ANY, SERVO_RIGHT_FOOT_ROLL, SIDE_STEP_FOOT_ROLL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, -10.0f},
-    {BUS_ANY, SERVO_RIGHT_KNEE, 8.0f},
-    {BUS_ANY, SERVO_WAIST_CENTER, -SIDE_STEP_WAIST_DEG},
-};
-
-static constexpr JointTarget WALK_LEFT_PHASE_B[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, -SIDE_STEP_HIP_OPEN_DEG * 0.5f},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, -SIDE_STEP_HIP_OPEN_DEG},
-    {BUS_ANY, SERVO_LEFT_FOOT_ROLL, SIDE_STEP_FOOT_ROLL_DEG},
-    {BUS_ANY, SERVO_RIGHT_FOOT_ROLL, -SIDE_STEP_FOOT_ROLL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, 8.0f},
-    {BUS_ANY, SERVO_RIGHT_KNEE, -10.0f},
-    {BUS_ANY, SERVO_WAIST_CENTER, SIDE_STEP_WAIST_DEG},
-};
-
-static constexpr JointTarget WALK_RIGHT_PHASE_A[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, SIDE_STEP_HIP_OPEN_DEG * 0.5f},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, SIDE_STEP_HIP_OPEN_DEG},
-    {BUS_ANY, SERVO_LEFT_FOOT_ROLL, -SIDE_STEP_FOOT_ROLL_DEG},
-    {BUS_ANY, SERVO_RIGHT_FOOT_ROLL, SIDE_STEP_FOOT_ROLL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, -10.0f},
-    {BUS_ANY, SERVO_RIGHT_KNEE, 8.0f},
-    {BUS_ANY, SERVO_WAIST_CENTER, SIDE_STEP_WAIST_DEG},
-};
-
-static constexpr JointTarget WALK_RIGHT_PHASE_B[] = {
-    {BUS_ANY, SERVO_LEFT_HIP_OPEN, SIDE_STEP_HIP_OPEN_DEG},
-    {BUS_ANY, SERVO_RIGHT_HIP_OPEN, SIDE_STEP_HIP_OPEN_DEG * 0.5f},
-    {BUS_ANY, SERVO_LEFT_FOOT_ROLL, SIDE_STEP_FOOT_ROLL_DEG},
-    {BUS_ANY, SERVO_RIGHT_FOOT_ROLL, -SIDE_STEP_FOOT_ROLL_DEG},
-    {BUS_ANY, SERVO_LEFT_KNEE, 8.0f},
-    {BUS_ANY, SERVO_RIGHT_KNEE, -10.0f},
-    {BUS_ANY, SERVO_WAIST_CENTER, -SIDE_STEP_WAIST_DEG},
-};
-
-static void playLeftPunch() {
-  logPrintln("Remote action: left punch");
-  applyGuardPose();
-  applyTargets(LEFT_PUNCH_EXTEND, ARRAY_COUNT(LEFT_PUNCH_EXTEND),
-               PUNCH_INTERVAL_MS);
-  delay(80);
-  applyGuardPose();
-  applyStandPose();
-}
-
-static void playRightPunch() {
-  logPrintln("Remote action: right punch");
-  applyGuardPose();
-  applyTargets(RIGHT_PUNCH_EXTEND, ARRAY_COUNT(RIGHT_PUNCH_EXTEND),
-               PUNCH_INTERVAL_MS);
-  delay(80);
-  applyGuardPose();
-  applyStandPose();
-}
-
-static void playLeftHookPunch() {
-  logPrintln("Remote action: left hook punch");
-  applyGuardPose();
-  applyTargets(LEFT_HOOK_EXTEND, ARRAY_COUNT(LEFT_HOOK_EXTEND),
-               PUNCH_INTERVAL_MS);
-  delay(100);
-  applyGuardPose();
-  applyStandPose();
-}
-
-static void playRightHookPunch() {
-  logPrintln("Remote action: right hook punch");
-  applyGuardPose();
-  applyTargets(RIGHT_HOOK_EXTEND, ARRAY_COUNT(RIGHT_HOOK_EXTEND),
-               PUNCH_INTERVAL_MS);
-  delay(100);
-  applyGuardPose();
-  applyStandPose();
-}
-
-static void applyWalkPhase(const JointTarget *phaseA, uint8_t phaseACount,
-                           const JointTarget *phaseB, uint8_t phaseBCount) {
-  if ((walkPhase & 1) == 0) {
-    applyTargets(phaseA, phaseACount, WALK_INTERVAL_MS);
-  } else {
-    applyTargets(phaseB, phaseBCount, WALK_INTERVAL_MS);
+static void applyFrame(const MotionFrame &frame) {
+  const uint8_t count = frame.targetCount < MAX_FRAME_TARGETS
+                            ? frame.targetCount
+                            : MAX_FRAME_TARGETS;
+  JointTarget targets[MAX_FRAME_TARGETS];
+  for (uint8_t i = 0; i < count; ++i) {
+    targets[i].busIndex = BUS_ANY;
+    targets[i].servoId = frame.targets[i].servoId;
+    targets[i].rawAngle = frame.targets[i].rawAngle;
   }
-  ++walkPhase;
-  standPoseApplied = false;
+
+  applyTargets(targets, count, frame.moveMs);
+  if (frame.delayMs > 0) {
+    delay(frame.delayMs);
+  }
 }
 
-static void applyForwardWalkPhase() {
-  switch (walkPhase % 4) {
-    case 0:
-      applyTargets(WALK_FORWARD_SHIFT_RIGHT,
-                   ARRAY_COUNT(WALK_FORWARD_SHIFT_RIGHT), WALK_INTERVAL_MS);
-      break;
-    case 1:
-      applyTargets(WALK_FORWARD_LEFT_SWING,
-                   ARRAY_COUNT(WALK_FORWARD_LEFT_SWING), WALK_INTERVAL_MS);
-      break;
-    case 2:
-      applyTargets(WALK_FORWARD_SHIFT_LEFT,
-                   ARRAY_COUNT(WALK_FORWARD_SHIFT_LEFT), WALK_INTERVAL_MS);
-      break;
-    case 3:
-    default:
-      applyTargets(WALK_FORWARD_RIGHT_SWING,
-                   ARRAY_COUNT(WALK_FORWARD_RIGHT_SWING), WALK_INTERVAL_MS);
-      break;
+static void playMotion(const char *name, const MotionFrame *frames,
+                       uint8_t frameCount, bool leaveIdlePoseApplied) {
+  logPrintf("Remote action: %s\r\n", name);
+  for (uint8_t i = 0; i < frameCount; ++i) {
+    applyFrame(frames[i]);
   }
-  ++walkPhase;
-  standPoseApplied = false;
+  idlePoseApplied = leaveIdlePoseApplied;
 }
 
-static const char *motionCommandActionName(MotionCommand command) {
-  switch (command) {
-    case MOTION_WALK_FORWARD:
-      return "walk forward";
-    case MOTION_WALK_BACKWARD:
-      return "walk backward";
-    case MOTION_WALK_LEFT:
-      return "walk left";
-    case MOTION_WALK_RIGHT:
-      return "walk right";
-    case MOTION_TURN_LEFT:
-      return "turn left";
-    case MOTION_TURN_RIGHT:
-      return "turn right";
-    case MOTION_IDLE:
-    default:
-      return "stand";
-  }
+static void playStandMotion(uint16_t intervalMs) {
+  MotionFrame frame = STAND_MOTION[0];
+  frame.moveMs = intervalMs;
+  playMotion("Stand", &frame, 1, true);
+}
+
+static void playSquadMotion() {
+  returnToStandPending = false;
+  playMotion("Squad", SQUAD_MOTION, ARRAY_COUNT(SQUAD_MOTION), true);
+}
+
+static void playForwardMotion() {
+  playMotion("Forward", FORWARD_MOTION, ARRAY_COUNT(FORWARD_MOTION), false);
+}
+
+static void playBackwardMotion() {
+  playMotion("Backward", BACKWARD_MOTION, ARRAY_COUNT(BACKWARD_MOTION), false);
+}
+
+static void playMoveleftMotion() {
+  playMotion("Moveleft", MOVELEFT_MOTION, ARRAY_COUNT(MOVELEFT_MOTION), false);
+}
+
+static void playMoveRightMotion() {
+  playMotion("MoveRight", MOVERIGHT_MOTION, ARRAY_COUNT(MOVERIGHT_MOTION),
+             false);
+}
+
+static void playRotateLeftMotion() {
+  playMotion("RotateLeft", ROTATELEFT_MOTION, ARRAY_COUNT(ROTATELEFT_MOTION),
+             false);
+}
+
+static void playRotateRightMotion() {
+  playMotion("RotateRight", ROTATERIGHT_MOTION,
+             ARRAY_COUNT(ROTATERIGHT_MOTION), false);
 }
 
 void applyStandPose(uint16_t intervalMs) {
-  applyTargets(STAND_POSE, ARRAY_COUNT(STAND_POSE), intervalMs);
-  standPoseApplied = true;
-}
-
-void applyGuardPose() {
-  applyTargets(GUARD_POSE, ARRAY_COUNT(GUARD_POSE), STAND_INTERVAL_MS);
-  standPoseApplied = false;
+  playStandMotion(intervalMs);
+  returnToStandPending = false;
 }
 
 void resetMotionState() {
-  walkPhase = 0;
-  lastWalkStepMs = 0;
-  lastMotionCommand = MOTION_IDLE;
-  standPoseApplied = false;
+  idlePoseApplied = false;
   motionArmed = false;
+  returnToStandPending = false;
 }
 
 bool handleRemoteActions(const RemoteSnapshot &snapshot) {
@@ -399,7 +390,14 @@ bool handleRemoteActions(const RemoteSnapshot &snapshot) {
   if (consumeSwitchZone(REMOTE_SYSTEM_CHANNEL,
                         snapshot.channels[REMOTE_SYSTEM_CHANNEL],
                         SWITCH_HIGH_MIN_US, SWITCH_HIGH_MAX_US, 1)) {
-    logPrintln("Remote action: start stand");
+    motionArmed = true;
+    applyStandPose();
+    actionRan = true;
+  }
+
+  if (consumeSwitchZone(REMOTE_POSE_CHANNEL,
+                        snapshot.channels[REMOTE_POSE_CHANNEL],
+                        SWITCH_HIGH_MIN_US, SWITCH_HIGH_MAX_US, 1)) {
     motionArmed = true;
     applyStandPose();
     actionRan = true;
@@ -408,9 +406,10 @@ bool handleRemoteActions(const RemoteSnapshot &snapshot) {
   if (consumeSwitchZone(REMOTE_SYSTEM_CHANNEL,
                         snapshot.channels[REMOTE_SYSTEM_CHANNEL],
                         SWITCH_LOW_MIN_US, SWITCH_LOW_MAX_US, 0)) {
-    logPrintln("Remote action: select unload servos");
+    logPrintln("Remote action: unload servos");
     motionArmed = false;
-    standPoseApplied = false;
+    idlePoseApplied = false;
+    returnToStandPending = false;
     unloadAllServos();
     actionRan = true;
   }
@@ -418,84 +417,51 @@ bool handleRemoteActions(const RemoteSnapshot &snapshot) {
   if (consumeSwitchZone(REMOTE_PUNCH_CHANNEL,
                         snapshot.channels[REMOTE_PUNCH_CHANNEL],
                         SWITCH_LOW_MIN_US, SWITCH_LOW_MAX_US, 0)) {
-    playLeftPunch();
+    playSquadMotion();
     actionRan = true;
   }
 
-  if (consumeSwitchZone(REMOTE_PUNCH_CHANNEL,
-                        snapshot.channels[REMOTE_PUNCH_CHANNEL],
-                        SWITCH_HIGH_MIN_US, SWITCH_HIGH_MAX_US, 1)) {
-    playRightPunch();
-    actionRan = true;
-  }
-
-  if (consumeSwitchZone(REMOTE_HOOK_CHANNEL,
-                        snapshot.channels[REMOTE_HOOK_CHANNEL],
+  if (consumeSwitchZone(REMOTE_POSE_CHANNEL,
+                        snapshot.channels[REMOTE_POSE_CHANNEL],
                         SWITCH_LOW_MIN_US, SWITCH_LOW_MAX_US, 0)) {
-    playLeftHookPunch();
+    playSquadMotion();
     actionRan = true;
   }
 
-  if (consumeSwitchZone(REMOTE_HOOK_CHANNEL,
-                        snapshot.channels[REMOTE_HOOK_CHANNEL],
-                        SWITCH_HIGH_MIN_US, SWITCH_HIGH_MAX_US, 1)) {
-    playRightHookPunch();
-    actionRan = true;
-  }
-
-  if (actionRan) {
-    lastWalkStepMs = millis();
-  }
   return actionRan;
 }
 
 void handleMotionCommand(MotionCommand command) {
-  if (command != lastMotionCommand) {
-    walkPhase = 0;
-    lastMotionCommand = command;
-  }
-
   if (command == MOTION_IDLE) {
-    if (motionArmed && !standPoseApplied) {
-      logPrintln("Remote action: stand");
+    if ((motionArmed || returnToStandPending) && !idlePoseApplied) {
       applyStandPose();
     }
     return;
   }
 
-  const uint32_t now = millis();
-  if (now - lastWalkStepMs < WALK_STEP_INTERVAL_MS) {
-    return;
-  }
-  lastWalkStepMs = now;
-  logPrintf("Remote action: %s\r\n", motionCommandActionName(command));
-
   switch (command) {
     case MOTION_WALK_FORWARD:
-      applyForwardWalkPhase();
+      playForwardMotion();
       break;
     case MOTION_WALK_BACKWARD:
-      applyWalkPhase(WALK_BACKWARD_PHASE_A, ARRAY_COUNT(WALK_BACKWARD_PHASE_A),
-                     WALK_BACKWARD_PHASE_B, ARRAY_COUNT(WALK_BACKWARD_PHASE_B));
+      playBackwardMotion();
       break;
     case MOTION_WALK_LEFT:
-      applyWalkPhase(WALK_LEFT_PHASE_A, ARRAY_COUNT(WALK_LEFT_PHASE_A),
-                     WALK_LEFT_PHASE_B, ARRAY_COUNT(WALK_LEFT_PHASE_B));
+      playMoveleftMotion();
       break;
     case MOTION_WALK_RIGHT:
-      applyWalkPhase(WALK_RIGHT_PHASE_A, ARRAY_COUNT(WALK_RIGHT_PHASE_A),
-                     WALK_RIGHT_PHASE_B, ARRAY_COUNT(WALK_RIGHT_PHASE_B));
+      playMoveRightMotion();
       break;
     case MOTION_TURN_LEFT:
-      applyWalkPhase(TURN_LEFT_PHASE_A, ARRAY_COUNT(TURN_LEFT_PHASE_A),
-                     TURN_LEFT_PHASE_B, ARRAY_COUNT(TURN_LEFT_PHASE_B));
+      playRotateLeftMotion();
       break;
     case MOTION_TURN_RIGHT:
-      applyWalkPhase(TURN_RIGHT_PHASE_A, ARRAY_COUNT(TURN_RIGHT_PHASE_A),
-                     TURN_RIGHT_PHASE_B, ARRAY_COUNT(TURN_RIGHT_PHASE_B));
+      playRotateRightMotion();
       break;
     case MOTION_IDLE:
     default:
-      break;
+      return;
   }
+
+  returnToStandPending = true;
 }

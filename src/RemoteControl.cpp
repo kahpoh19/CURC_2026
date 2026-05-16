@@ -18,6 +18,8 @@ static constexpr uint32_t REMOTE_DEBUG_MIN_INTERVAL_MS = 100;
 static constexpr uint32_t REMOTE_DEBUG_HEARTBEAT_MS = 1000;
 static constexpr int16_t REMOTE_DEBUG_AXIS_DELTA = 20;
 static constexpr uint16_t REMOTE_DEBUG_CHANNEL_DELTA_US = 20;
+static constexpr uint8_t BUTTON_A_BIT = 0;
+static constexpr uint8_t BUTTON_Y_BIT = 3;
 static constexpr uint8_t BUTTON_LB_BIT = 4;
 static constexpr uint8_t BUTTON_RB_BIT = 5;
 static constexpr uint8_t BUTTON_SELECT_BIT = 6;
@@ -1241,25 +1243,21 @@ static void formatUsefulControls(const RemoteSnapshot &snapshot, char *out,
                     SWITCH_HIGH_MIN_US, SWITCH_HIGH_MAX_US)) {
     appendControlName(out, outSize, "Start_stand");
   }
+  if (channelInZone(snapshot.channels[REMOTE_POSE_CHANNEL],
+                    SWITCH_HIGH_MIN_US, SWITCH_HIGH_MAX_US)) {
+    appendControlName(out, outSize, "Y_Stand");
+  }
   if (channelInZone(snapshot.channels[REMOTE_SYSTEM_CHANNEL],
                     SWITCH_LOW_MIN_US, SWITCH_LOW_MAX_US)) {
     appendControlName(out, outSize, "Select_unload");
   }
+  if (channelInZone(snapshot.channels[REMOTE_POSE_CHANNEL],
+                    SWITCH_LOW_MIN_US, SWITCH_LOW_MAX_US)) {
+    appendControlName(out, outSize, "A_Squad");
+  }
   if (channelInZone(snapshot.channels[REMOTE_PUNCH_CHANNEL],
                     SWITCH_LOW_MIN_US, SWITCH_LOW_MAX_US)) {
-    appendControlName(out, outSize, "LB_left_punch");
-  }
-  if (channelInZone(snapshot.channels[REMOTE_PUNCH_CHANNEL],
-                    SWITCH_HIGH_MIN_US, SWITCH_HIGH_MAX_US)) {
-    appendControlName(out, outSize, "RB_right_punch");
-  }
-  if (channelInZone(snapshot.channels[REMOTE_HOOK_CHANNEL],
-                    SWITCH_LOW_MIN_US, SWITCH_LOW_MAX_US)) {
-    appendControlName(out, outSize, "LT_left_hook");
-  }
-  if (channelInZone(snapshot.channels[REMOTE_HOOK_CHANNEL],
-                    SWITCH_HIGH_MIN_US, SWITCH_HIGH_MAX_US)) {
-    appendControlName(out, outSize, "RT_right_hook");
+    appendControlName(out, outSize, "LB_Squad");
   }
 
   if (out[0] == '\0') {
@@ -1316,6 +1314,8 @@ RemoteSnapshot readRemoteSnapshot() {
       buttonSwitchPulse(state.buttons, BUTTON_SELECT_BIT, BUTTON_START_BIT);
   snapshot.channels[REMOTE_HOOK_CHANNEL] =
       triggerSwitchPulse(state.lt, state.rt);
+  snapshot.channels[REMOTE_POSE_CHANNEL] =
+      buttonSwitchPulse(state.buttons, BUTTON_A_BIT, BUTTON_Y_BIT);
 
   snapshot.ageUs =
       state.lastReportUs == 0 ? UINT32_MAX : micros() - state.lastReportUs;
@@ -1385,7 +1385,7 @@ void reportRemoteSnapshot(const RemoteSnapshot &snapshot) {
   logPrintf(
       "%s input: lx=%d ly=%d rx=%d ry=%d lt=%d rt=%d hat=0x%02x "
       "controls=%s walk=%u strafe=%u turn=%u punch=%u system=%u hook=%u "
-      "age=%luus\r\n",
+      "pose=%u age=%luus\r\n",
       remoteBackendName(), state.lx, state.ly, state.rx, state.ry,
       state.lt, state.rt, state.hat, controlsText,
       snapshot.channels[REMOTE_WALK_CHANNEL],
@@ -1394,6 +1394,7 @@ void reportRemoteSnapshot(const RemoteSnapshot &snapshot) {
       snapshot.channels[REMOTE_PUNCH_CHANNEL],
       snapshot.channels[REMOTE_SYSTEM_CHANNEL],
       snapshot.channels[REMOTE_HOOK_CHANNEL],
+      snapshot.channels[REMOTE_POSE_CHANNEL],
       static_cast<unsigned long>(snapshot.ageUs));
 #else
   (void)snapshot;

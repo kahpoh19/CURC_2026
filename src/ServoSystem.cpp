@@ -8,8 +8,8 @@
 // Servo driver TX -> ESP32-S3 RX.
 // Servo driver RX -> ESP32-S3 TX.
 // GND must be common.
-static constexpr int SERVO_A_RX_PIN = 17;
-static constexpr int SERVO_A_TX_PIN = 16;
+static constexpr int SERVO_A_RX_PIN = 18;
+static constexpr int SERVO_A_TX_PIN = 17;
 static constexpr int SERVO_B_RX_PIN = 10;
 static constexpr int SERVO_B_TX_PIN = 9;
 static constexpr uint32_t SERVO_BAUDRATE = 115200;
@@ -35,6 +35,10 @@ static constexpr uint8_t SCAN_START_ID = 0;
 static constexpr uint8_t SCAN_END_ID = 254;
 
 static constexpr bool LOG_SERVO_COMMANDS = false;
+// Mode 1 sends angle + interval + power only. Mode 2 also sends t_acc/t_dec,
+// which changes the timing profile relative to the JSON motion data.
+static constexpr uint8_t SYNC_MODE_RAW_ANGLE_BY_INTERVAL = 1;
+static constexpr uint16_t MIN_RAMP_TIME_MS = 20;
 
 struct ServoBus {
   const char *name;
@@ -215,6 +219,11 @@ static bool shouldCommandServo(bool online) {
   return !ENABLE_SERVO_DETECTION || online;
 }
 
+static uint16_t rampTimeForInterval(uint16_t intervalMs) {
+  (void)intervalMs;
+  return MIN_RAMP_TIME_MS;
+}
+
 static void setServoAngle(ServoBus &bus, FSUS_Servo &servo, bool online,
                           float angle, uint16_t intervalMs = 1000) {
   if (!shouldCommandServo(online)) {
@@ -226,8 +235,49 @@ static void setServoAngle(ServoBus &bus, FSUS_Servo &servo, bool online,
               servo.servoId, angle);
   }
 
-  const uint16_t rampMs = intervalMs < 200 ? intervalMs / 2 : 100;
+  const uint16_t rampMs = rampTimeForInterval(intervalMs);
   servo.setRawAngleByInterval(angle, intervalMs, rampMs, rampMs, 0);
+}
+
+static bool addSyncTarget(ServoBus &bus, uint8_t servoIndex, float angle,
+                          uint16_t intervalMs,
+                          FSUS_sync_servo *syncTargets,
+                          uint8_t &syncCount) {
+  if (!shouldCommandServo(bus.online[servoIndex])) {
+    return false;
+  }
+
+  if (syncCount >= CONFIGURED_SERVO_COUNT) {
+    logPrintf("Too many sync targets on bus %s\r\n", bus.name);
+    return false;
+  }
+
+  const uint16_t rampMs = rampTimeForInterval(intervalMs);
+  FSUS_sync_servo &syncTarget = syncTargets[syncCount++];
+  syncTarget.servoId = bus.servos[servoIndex].servoId;
+  syncTarget.angle = angle;
+  syncTarget.velocity = 0;
+  syncTarget.interval = intervalMs;
+  syncTarget.interval_multiturn = 0;
+  syncTarget.t_acc = rampMs;
+  syncTarget.t_dec = rampMs;
+  syncTarget.power = 0;
+  return true;
+}
+
+static void sendSyncTargets(ServoBus &bus, FSUS_sync_servo *syncTargets,
+                            uint8_t syncCount, uint16_t intervalMs) {
+  if (syncCount == 0) {
+    return;
+  }
+
+  if (LOG_SERVO_COMMANDS) {
+    logPrintf("Sync bus %s targets=%u interval=%u ms\r\n", bus.name,
+              syncCount, intervalMs);
+  }
+
+  bus.protocol->sendSyncCommand(syncCount, SYNC_MODE_RAW_ANGLE_BY_INTERVAL,
+                                syncTargets);
 }
 
 static void reportServoAngle(ServoBus &bus, FSUS_Servo &servo, bool online) {
@@ -343,6 +393,9 @@ void unloadAllServos() {
 
 void applyTargets(const JointTarget *targets, uint8_t count,
                   uint16_t intervalMs) {
+  FSUS_sync_servo syncTargets[SERVO_BUS_COUNT][CONFIGURED_SERVO_COUNT] = {};
+  uint8_t syncCounts[SERVO_BUS_COUNT] = {};
+
   for (uint8_t i = 0; i < count; ++i) {
     const JointTarget &target = targets[i];
     if (target.busIndex != SERVO_BUS_ALL && target.busIndex >= SERVO_BUS_COUNT) {
@@ -359,15 +412,20 @@ void applyTargets(const JointTarget *targets, uint8_t count,
     if (target.busIndex == SERVO_BUS_ALL) {
       for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
         ServoBus &bus = servoBuses[busIndex];
-        setServoAngle(bus, bus.servos[servoIndex], bus.online[servoIndex],
-                      target.rawAngle, intervalMs);
+        addSyncTarget(bus, servoIndex, target.rawAngle, intervalMs,
+                      syncTargets[busIndex], syncCounts[busIndex]);
       }
     } else {
       ServoBus &bus = servoBuses[target.busIndex];
-      setServoAngle(bus, bus.servos[servoIndex], bus.online[servoIndex],
-                    target.rawAngle, intervalMs);
+      addSyncTarget(bus, servoIndex, target.rawAngle, intervalMs,
+                    syncTargets[target.busIndex], syncCounts[target.busIndex]);
     }
   }
 
-  delay(intervalMs + 20);
+  for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
+    sendSyncTargets(servoBuses[busIndex], syncTargets[busIndex],
+                    syncCounts[busIndex], intervalMs);
+  }
+
+  delay(intervalMs);
 }

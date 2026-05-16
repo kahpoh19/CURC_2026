@@ -29,6 +29,7 @@ static constexpr uint8_t REMOTE_PUNCH_CHANNEL = 4;
 static constexpr uint8_t REMOTE_MODE_CHANNEL = 5;
 static constexpr uint8_t REMOTE_SYSTEM_CHANNEL = 6;
 static constexpr uint8_t REMOTE_HOOK_CHANNEL = 7;
+static constexpr uint8_t REMOTE_POSE_CHANNEL = 8;
 
 static constexpr uint16_t SWITCH_LOW_MIN_US = 900;
 static constexpr uint16_t SWITCH_LOW_MAX_US = 1150;
