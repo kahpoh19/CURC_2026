@@ -9,7 +9,7 @@
 // Servo driver RX -> ESP32-S3 TX.
 // GND must be common.
 static constexpr int SERVO_A_TX_PIN = 17;
-static constexpr int SERVO_A_RX_PIN = 16;
+static constexpr int SERVO_A_RX_PIN = 18;
 // Servo B is temporarily disabled.
 // static constexpr int SERVO_B_TX_PIN = 35;
 // static constexpr int SERVO_B_RX_PIN = 38;
