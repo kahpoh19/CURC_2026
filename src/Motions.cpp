@@ -7,9 +7,6 @@
 
 static constexpr uint8_t BUS_ANY = SERVO_BUS_ALL;
 static constexpr uint8_t MAX_FRAME_TARGETS = 17;
-static constexpr uint16_t GUARD_INTERVAL_MS = 350;
-static constexpr uint16_t PUNCH_INTERVAL_MS = 220;
-static constexpr uint16_t PUNCH_RETURN_PAUSE_MS = 80;
 static constexpr uint16_t TURN_REPEAT_PAUSE_MS = 200;
 
 struct ServoAngle {
@@ -52,20 +49,39 @@ static constexpr MotionFrame SQUAD_MOTION[] = {
     {SQUAD_FRAME_0, ARRAY_COUNT(SQUAD_FRAME_0), 300, 0},
 };
 
-static constexpr ServoAngle GUARD_FRAME[] = {
-    {0, 0.0f}, {1, 42.0f}, {2, 28.0f}, {3, 10.0f},
-    {4, -10.0f}, {5, 0.0f}, {6, -42.0f}, {7, 28.0f},
+static constexpr ServoAngle LB_FRAME_0[] = {
+    {5, 110.0f}, {6, 0.0f}, {7, 50.0f}, {4, 100.0f},
+    {3, 10.0f}, {0, -30.0f}, {1, 0.0f}, {2, -30.0f},
+    {9, -10.0f}, {8, 10.0f}, {13, -85.0f}, {14, 65.0f},
+    {15, -10.0f}, {10, 85.0f}, {11, -65.0f}, {12, 10.0f},
+    {16, -40.0f},
 };
-
-static constexpr ServoAngle LEFT_PUNCH_FRAME[] = {
-    {0, 0.0f}, {1, 0.0f}, {2, 64.0f}, {3, 4.0f},
-    {6, -48.0f}, {7, 18.0f},
+static constexpr ServoAngle LB_FRAME_1[] = {
+    {5, 110.0f}, {6, 0.0f}, {7, 50.0f}, {4, 100.0f},
+    {3, -10.0f}, {0, -10.0f}, {1, 0.0f}, {2, -30.0f},
+    {9, -15.0f}, {8, 15.0f}, {13, -85.0f}, {14, 65.0f},
+    {15, -15.0f}, {10, 85.0f}, {11, -65.0f}, {12, 15.0f},
+    {16, 100.0f},
 };
-static constexpr MotionFrame LEFT_PUNCH_MOTION[] = {
-    {GUARD_FRAME, ARRAY_COUNT(GUARD_FRAME), GUARD_INTERVAL_MS, 0},
-    {LEFT_PUNCH_FRAME, ARRAY_COUNT(LEFT_PUNCH_FRAME), PUNCH_INTERVAL_MS,
-     PUNCH_RETURN_PAUSE_MS},
-    {GUARD_FRAME, ARRAY_COUNT(GUARD_FRAME), GUARD_INTERVAL_MS, 0},
+static constexpr ServoAngle LB_FRAME_2[] = {
+    {5, 40.0f}, {6, 0.0f}, {7, 0.0f}, {4, 100.0f},
+    {3, -10.0f}, {0, -10.0f}, {1, 0.0f}, {2, -50.0f},
+    {9, -15.0f}, {8, 15.0f}, {13, -85.0f}, {14, 65.0f},
+    {15, -15.0f}, {10, 85.0f}, {11, -65.0f}, {12, 15.0f},
+    {16, 100.0f},
+};
+static constexpr ServoAngle LB_FRAME_3[] = {
+    {5, 30.0f}, {6, 0.0f}, {7, 20.0f}, {4, -10.0f},
+    {3, 10.0f}, {0, -30.0f}, {1, 0.0f}, {2, -20.0f},
+    {9, -10.0f}, {8, 10.0f}, {13, -65.0f}, {14, 50.0f},
+    {15, -10.0f}, {10, 65.0f}, {11, -50.0f}, {12, 10.0f},
+    {16, 0.0f},
+};
+static constexpr MotionFrame LB_MOTION[] = {
+    {LB_FRAME_0, ARRAY_COUNT(LB_FRAME_0), 500, 0},
+    {LB_FRAME_1, ARRAY_COUNT(LB_FRAME_1), 200, 300},
+    {LB_FRAME_2, ARRAY_COUNT(LB_FRAME_2), 200, 300},
+    {LB_FRAME_3, ARRAY_COUNT(LB_FRAME_3), 700, 0},
 };
 
 static constexpr ServoAngle LT_FRAME_0[] = {
@@ -123,22 +139,22 @@ static constexpr MotionFrame RB_MOTION[] = {
 };
 
 static constexpr ServoAngle RT_FRAME_0[] = {
-    {5, 100.0f}, {6, 0.0f}, {7, 0.4f}, {4, -7.3f},
-    {3, 25.5f}, {0, -133.0f}, {1, -90.0f}, {2, 5.0f},
-    {9, -15.0f}, {8, 15.0f}, {13, -70.0f}, {14, 69.0f},
-    {15, -15.0f}, {10, 31.0f}, {11, -70.0f}, {12, 25.0f},
+    {0, -120.4f}, {1, -40.0f}, {2, 11.3f}, {3, -60.9f},
+    {4, -10.0f}, {5, 30.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 15.0f}, {9, -15.0f}, {10, 30.0f}, {11, -60.0f},
+    {12, 25.0f}, {13, -65.0f}, {14, 45.0f}, {15, -15.0f},
     {16, -100.0f},
 };
 static constexpr ServoAngle RT_FRAME_1[] = {
-    {5, 30.0f}, {6, 0.0f}, {7, 30.0f}, {4, -10.0f},
-    {3, 10.0f}, {0, -30.0f}, {1, 0.0f}, {2, -30.0f},
-    {9, -10.0f}, {8, 10.0f}, {13, -55.0f}, {14, 35.0f},
-    {15, -10.0f}, {10, 55.0f}, {11, -35.0f}, {12, 10.0f},
+    {0, -30.0f}, {1, 0.0f}, {2, -30.0f}, {3, 10.0f},
+    {4, -10.0f}, {5, 30.0f}, {6, 0.0f}, {7, 30.0f},
+    {8, 10.0f}, {9, -10.0f}, {10, 55.0f}, {11, -35.0f},
+    {12, 10.0f}, {13, -55.0f}, {14, 35.0f}, {15, -10.0f},
     {16, 0.0f},
 };
 static constexpr MotionFrame RT_MOTION[] = {
     {RT_FRAME_0, ARRAY_COUNT(RT_FRAME_0), 300, 300},
-    {RT_FRAME_1, ARRAY_COUNT(RT_FRAME_1), 1000, 200},
+    {RT_FRAME_1, ARRAY_COUNT(RT_FRAME_1), 700, 0},
 };
 
 static constexpr ServoAngle X_FRAME_0[] = {
@@ -168,8 +184,8 @@ static constexpr ServoAngle B_FRAME_0[] = {
     {16, 0.0f},
 };
 static constexpr ServoAngle B_FRAME_1[] = {
-    {0, -30.0f}, {1, -90.0f}, {2, 90.0f}, {3, -140.0f},
-    {4, 140.0f}, {5, 30.0f}, {6, 90.0f}, {7, -90.0f},
+    {0, -30.0f}, {1, -90.0f}, {2, 90.0f}, {3, -150.0f},
+    {4, 150.0f}, {5, 30.0f}, {6, 90.0f}, {7, -90.0f},
     {8, 15.0f}, {9, -15.0f}, {10, 100.0f}, {11, -80.0f},
     {12, 15.0f}, {13, -100.0f}, {14, 80.0f}, {15, -15.0f},
     {16, 0.0f},
@@ -478,9 +494,7 @@ static void playSquadMotion() {
 
 static void playLeftPunch() {
   returnToStandPending = false;
-  playMotion("LeftPunch", LEFT_PUNCH_MOTION, ARRAY_COUNT(LEFT_PUNCH_MOTION),
-             false);
-  applyStandPose();
+  playMotion("LB", LB_MOTION, ARRAY_COUNT(LB_MOTION), true);
 }
 
 static void playRightPunch() {

@@ -1279,7 +1279,7 @@ static void formatUsefulControls(const RemoteSnapshot &snapshot, char *out,
   }
   if (channelInZone(snapshot.channels[REMOTE_PUNCH_CHANNEL],
                     SWITCH_LOW_MIN_US, SWITCH_LOW_MAX_US)) {
-    appendControlName(out, outSize, "LB_left_punch");
+    appendControlName(out, outSize, "LB");
   }
   if (channelInZone(snapshot.channels[REMOTE_PUNCH_CHANNEL],
                     SWITCH_HIGH_MIN_US, SWITCH_HIGH_MAX_US)) {
