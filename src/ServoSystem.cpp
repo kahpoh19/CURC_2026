@@ -40,6 +40,9 @@ static constexpr bool LOG_SERVO_COMMANDS = false;
 // which changes the timing profile relative to the JSON motion data.
 static constexpr uint8_t SYNC_MODE_RAW_ANGLE_BY_INTERVAL = 1;
 static constexpr uint16_t MIN_RAMP_TIME_MS = 20;
+static constexpr bool RESET_MULTITURN_ON_BOOT = true;
+static constexpr uint16_t RESET_MULTITURN_BOOT_DELAY_MS = 1000;
+static constexpr uint16_t RESET_MULTITURN_SETTLE_MS = 300;
 
 struct ServoBus {
   const char *name;
@@ -298,6 +301,30 @@ static bool configuredServoIndex(uint8_t servoId, uint8_t &index) {
   return true;
 }
 
+static void resetConfiguredServoMultiTurnAngles() {
+  if (!RESET_MULTITURN_ON_BOOT) {
+    return;
+  }
+
+  logPrintf("Resetting multi-turn angle for servo IDs %u..%u after %u ms\r\n",
+            CONFIGURED_SERVO_START_ID, CONFIGURED_SERVO_END_ID,
+            RESET_MULTITURN_BOOT_DELAY_MS);
+  delay(RESET_MULTITURN_BOOT_DELAY_MS);
+
+  for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
+    ServoBus &bus = servoBuses[busIndex];
+    for (uint8_t i = 0; i < CONFIGURED_SERVO_COUNT; ++i) {
+      if (!shouldCommandServo(bus.online[i])) {
+        continue;
+      }
+      bus.servos[i].ResetMultiTurnAngle();
+    }
+  }
+
+  delay(RESET_MULTITURN_SETTLE_MS);
+  logPrintln("Multi-turn angle reset complete.");
+}
+
 bool isServoDetectionEnabled() {
   return ENABLE_SERVO_DETECTION;
 }
@@ -319,6 +346,8 @@ void setupServoSystem() {
   for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
     initConfiguredServoObjects(servoBuses[busIndex]);
   }
+
+  resetConfiguredServoMultiTurnAngles();
 
   if (SET_ID_MODE) {
     runIdSettingMode(servoBuses[0]);
