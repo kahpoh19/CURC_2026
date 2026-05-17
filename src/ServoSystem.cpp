@@ -10,8 +10,9 @@
 // GND must be common.
 static constexpr int SERVO_A_TX_PIN = 17;
 static constexpr int SERVO_A_RX_PIN = 16;
-static constexpr int SERVO_B_TX_PIN = 35;
-static constexpr int SERVO_B_RX_PIN = 38;
+// Servo B is temporarily disabled.
+// static constexpr int SERVO_B_TX_PIN = 35;
+// static constexpr int SERVO_B_RX_PIN = 38;
 static constexpr uint32_t SERVO_BAUDRATE = 115200;
 
 // Set to false to skip servo scanning/initialization and command directly.
@@ -51,20 +52,16 @@ struct ServoBus {
 };
 
 HardwareSerial ServoSerialA(1);
-HardwareSerial ServoSerialB(2);
 FSUS_Protocol protocolA;
-FSUS_Protocol protocolB;
 FSUS_Servo servosA[CONFIGURED_SERVO_COUNT];
-FSUS_Servo servosB[CONFIGURED_SERVO_COUNT];
 
 bool servoOnlineA[CONFIGURED_SERVO_COUNT] = {};
-bool servoOnlineB[CONFIGURED_SERVO_COUNT] = {};
 
 ServoBus servoBuses[] = {
     {"A", &ServoSerialA, &protocolA, servosA, servoOnlineA, SERVO_A_RX_PIN,
      SERVO_A_TX_PIN},
-    {"B", &ServoSerialB, &protocolB, servosB, servoOnlineB, SERVO_B_RX_PIN,
-     SERVO_B_TX_PIN},
+    // {"B", &ServoSerialB, &protocolB, servosB, servoOnlineB,
+    //  SERVO_B_RX_PIN, SERVO_B_TX_PIN},
 };
 static constexpr uint8_t SERVO_BUS_COUNT =
     sizeof(servoBuses) / sizeof(servoBuses[0]);
@@ -309,8 +306,7 @@ void setupServoSystem() {
   logPrintln("FashionStar UART humanoid remote control on ESP32-S3");
   logPrintf("Servo UART A: baud=%lu RX=%d TX=%d\r\n", SERVO_BAUDRATE,
             SERVO_A_RX_PIN, SERVO_A_TX_PIN);
-  logPrintf("Servo UART B: baud=%lu RX=%d TX=%d\r\n", SERVO_BAUDRATE,
-            SERVO_B_RX_PIN, SERVO_B_TX_PIN);
+  logPrintln("Servo UART B: disabled");
 
   for (uint8_t busIndex = 0; busIndex < SERVO_BUS_COUNT; ++busIndex) {
     ServoBus &bus = servoBuses[busIndex];
