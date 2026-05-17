@@ -51,8 +51,9 @@ void setup() {
 
   if (isRemoteControlEnabled()) {
     logPrintln(
-        "Remote map: Y/Start Stand, Select unload, A/LB Squad, D-pad/left "
-        "stick Forward/Backward/Moveleft/MoveRight, right stick RotateLeft/"
+        "Remote map: Y/Start Stand, Select unload, A Squad, LB left punch, "
+        "X/B/LT/RB/RT JSON motions, D-pad/left stick "
+        "Forward/Backward/Moveleft/MoveRight, right stick RotateLeft/"
         "RotateRight.");
   }
 }

@@ -19,6 +19,8 @@ static constexpr uint32_t REMOTE_DEBUG_HEARTBEAT_MS = 1000;
 static constexpr int16_t REMOTE_DEBUG_AXIS_DELTA = 20;
 static constexpr uint16_t REMOTE_DEBUG_CHANNEL_DELTA_US = 20;
 static constexpr uint8_t BUTTON_A_BIT = 0;
+static constexpr uint8_t BUTTON_B_BIT = 1;
+static constexpr uint8_t BUTTON_X_BIT = 2;
 static constexpr uint8_t BUTTON_Y_BIT = 3;
 static constexpr uint8_t BUTTON_LB_BIT = 4;
 static constexpr uint8_t BUTTON_RB_BIT = 5;
@@ -827,6 +829,18 @@ static bool updateGamepadFromXinputReport(const uint8_t *data, size_t length) {
   }
 
   uint32_t buttons = 0;
+  if (report[3] & 0x10) {
+    buttons |= 1UL << BUTTON_A_BIT;
+  }
+  if (report[3] & 0x20) {
+    buttons |= 1UL << BUTTON_B_BIT;
+  }
+  if (report[3] & 0x40) {
+    buttons |= 1UL << BUTTON_X_BIT;
+  }
+  if (report[3] & 0x80) {
+    buttons |= 1UL << BUTTON_Y_BIT;
+  }
   if (report[3] & 0x01) {
     buttons |= 1UL << BUTTON_LB_BIT;
   }
@@ -1255,10 +1269,127 @@ static void formatUsefulControls(const RemoteSnapshot &snapshot, char *out,
                     SWITCH_LOW_MIN_US, SWITCH_LOW_MAX_US)) {
     appendControlName(out, outSize, "A_Squad");
   }
+  if (channelInZone(snapshot.channels[REMOTE_GETUP_CHANNEL],
+                    SWITCH_LOW_MIN_US, SWITCH_LOW_MAX_US)) {
+    appendControlName(out, outSize, "X");
+  }
+  if (channelInZone(snapshot.channels[REMOTE_GETUP_CHANNEL],
+                    SWITCH_HIGH_MIN_US, SWITCH_HIGH_MAX_US)) {
+    appendControlName(out, outSize, "B");
+  }
   if (channelInZone(snapshot.channels[REMOTE_PUNCH_CHANNEL],
                     SWITCH_LOW_MIN_US, SWITCH_LOW_MAX_US)) {
-    appendControlName(out, outSize, "LB_Squad");
+    appendControlName(out, outSize, "LB_left_punch");
   }
+  if (channelInZone(snapshot.channels[REMOTE_PUNCH_CHANNEL],
+                    SWITCH_HIGH_MIN_US, SWITCH_HIGH_MAX_US)) {
+    appendControlName(out, outSize, "RB");
+  }
+  if (channelInZone(snapshot.channels[REMOTE_HOOK_CHANNEL],
+                    SWITCH_LOW_MIN_US, SWITCH_LOW_MAX_US)) {
+    appendControlName(out, outSize, "LT");
+  }
+  if (channelInZone(snapshot.channels[REMOTE_HOOK_CHANNEL],
+                    SWITCH_HIGH_MIN_US, SWITCH_HIGH_MAX_US)) {
+    appendControlName(out, outSize, "RT");
+  }
+
+  if (out[0] == '\0') {
+    strncpy(out, "-", outSize - 1);
+    out[outSize - 1] = '\0';
+  }
+}
+
+static void appendMappedHatButtons(const GamepadState &state, char *out,
+                                   size_t outSize) {
+  if (state.hatIsButtonMask) {
+    if (state.hat & 0x01) {
+      appendControlName(out, outSize, "DpadUp");
+    }
+    if (state.hat & 0x02) {
+      appendControlName(out, outSize, "DpadDown");
+    }
+    if (state.hat & 0x04) {
+      appendControlName(out, outSize, "DpadLeft");
+    }
+    if (state.hat & 0x08) {
+      appendControlName(out, outSize, "DpadRight");
+    }
+    return;
+  }
+
+  switch (state.hat) {
+    case 0:
+      appendControlName(out, outSize, "DpadUp");
+      break;
+    case 1:
+      appendControlName(out, outSize, "DpadUp");
+      appendControlName(out, outSize, "DpadRight");
+      break;
+    case 2:
+      appendControlName(out, outSize, "DpadRight");
+      break;
+    case 3:
+      appendControlName(out, outSize, "DpadDown");
+      appendControlName(out, outSize, "DpadRight");
+      break;
+    case 4:
+      appendControlName(out, outSize, "DpadDown");
+      break;
+    case 5:
+      appendControlName(out, outSize, "DpadDown");
+      appendControlName(out, outSize, "DpadLeft");
+      break;
+    case 6:
+      appendControlName(out, outSize, "DpadLeft");
+      break;
+    case 7:
+      appendControlName(out, outSize, "DpadUp");
+      appendControlName(out, outSize, "DpadLeft");
+      break;
+    default:
+      break;
+  }
+}
+
+static void formatMappedButtons(const GamepadState &state, char *out,
+                                size_t outSize) {
+  if (outSize == 0) {
+    return;
+  }
+  out[0] = '\0';
+
+  if (state.buttons & (1UL << BUTTON_A_BIT)) {
+    appendControlName(out, outSize, "A");
+  }
+  if (state.buttons & (1UL << BUTTON_B_BIT)) {
+    appendControlName(out, outSize, "B");
+  }
+  if (state.buttons & (1UL << BUTTON_X_BIT)) {
+    appendControlName(out, outSize, "X");
+  }
+  if (state.buttons & (1UL << BUTTON_Y_BIT)) {
+    appendControlName(out, outSize, "Y");
+  }
+  if (state.buttons & (1UL << BUTTON_LB_BIT)) {
+    appendControlName(out, outSize, "LB");
+  }
+  if (state.buttons & (1UL << BUTTON_RB_BIT)) {
+    appendControlName(out, outSize, "RB");
+  }
+  if (state.lt >= TRIGGER_ACTION_THRESHOLD) {
+    appendControlName(out, outSize, "LT");
+  }
+  if (state.rt >= TRIGGER_ACTION_THRESHOLD) {
+    appendControlName(out, outSize, "RT");
+  }
+  if (state.buttons & (1UL << BUTTON_SELECT_BIT)) {
+    appendControlName(out, outSize, "Select");
+  }
+  if (state.buttons & (1UL << BUTTON_START_BIT)) {
+    appendControlName(out, outSize, "Start");
+  }
+  appendMappedHatButtons(state, out, outSize);
 
   if (out[0] == '\0') {
     strncpy(out, "-", outSize - 1);
@@ -1316,6 +1447,8 @@ RemoteSnapshot readRemoteSnapshot() {
       triggerSwitchPulse(state.lt, state.rt);
   snapshot.channels[REMOTE_POSE_CHANNEL] =
       buttonSwitchPulse(state.buttons, BUTTON_A_BIT, BUTTON_Y_BIT);
+  snapshot.channels[REMOTE_GETUP_CHANNEL] =
+      buttonSwitchPulse(state.buttons, BUTTON_X_BIT, BUTTON_B_BIT);
 
   snapshot.ageUs =
       state.lastReportUs == 0 ? UINT32_MAX : micros() - state.lastReportUs;
@@ -1375,27 +1508,14 @@ void reportRemoteSnapshot(const RemoteSnapshot &snapshot) {
   formatUsefulControls(snapshot, controlsText, sizeof(controlsText));
 
   if (!snapshot.active) {
-    logPrintf("%s remote inactive: connected=%u seen=%u age=%luus\r\n",
-              remoteBackendName(), state.connected ? 1 : 0,
-              state.reportSeen ? 1 : 0,
-              static_cast<unsigned long>(snapshot.ageUs));
     return;
   }
 
-  logPrintf(
-      "%s input: lx=%d ly=%d rx=%d ry=%d lt=%d rt=%d hat=0x%02x "
-      "controls=%s walk=%u strafe=%u turn=%u punch=%u system=%u hook=%u "
-      "pose=%u age=%luus\r\n",
-      remoteBackendName(), state.lx, state.ly, state.rx, state.ry,
-      state.lt, state.rt, state.hat, controlsText,
-      snapshot.channels[REMOTE_WALK_CHANNEL],
-      snapshot.channels[REMOTE_STRAFE_CHANNEL],
-      snapshot.channels[REMOTE_TURN_CHANNEL],
-      snapshot.channels[REMOTE_PUNCH_CHANNEL],
-      snapshot.channels[REMOTE_SYSTEM_CHANNEL],
-      snapshot.channels[REMOTE_HOOK_CHANNEL],
-      snapshot.channels[REMOTE_POSE_CHANNEL],
-      static_cast<unsigned long>(snapshot.ageUs));
+  if (strcmp(controlsText, "-") == 0) {
+    return;
+  }
+
+  logPrintf("%s action: %s\r\n", remoteBackendName(), controlsText);
 #else
   (void)snapshot;
 #endif
