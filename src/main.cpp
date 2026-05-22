@@ -49,6 +49,11 @@ void setup() {
 
   setupServoSystem();
 
+  // ── boot-time servo self-test: move all to 0° ─────────────────
+  logPrintln("=== Boot servo test: moving all servos to 0 degrees ===");
+  moveAllAndReport(0.0f);
+  logPrintln("=== Boot servo test done. Waiting for remote... ===");
+
   if (isRemoteControlEnabled()) {
     logPrintln(
         "Remote map: Y/Start Stand, Select unload, A Squad, "
@@ -70,6 +75,18 @@ void loop() {
 
   const RemoteSnapshot snapshot = readRemoteSnapshot();
   reportRemoteSnapshot(snapshot);
+
+  // ── debug: print channel values once per second ──────────────
+  static uint32_t lastDebugMs = 0;
+  if (millis() - lastDebugMs >= 2000) {
+    logPrintf("[SNAP] active=%d ch=[%u %u %u %u %u %u %u %u %u %u]\r\n",
+              snapshot.active,
+              snapshot.channels[0], snapshot.channels[1], snapshot.channels[2],
+              snapshot.channels[3], snapshot.channels[4], snapshot.channels[5],
+              snapshot.channels[6], snapshot.channels[7], snapshot.channels[8],
+              snapshot.channels[9]);
+    lastDebugMs = millis();
+  }
 
   if (!snapshot.active) {
     handleRemoteLoss();
