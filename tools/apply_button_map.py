@@ -26,8 +26,7 @@ apply_button_map.py — 将按钮→动作映射表写入 Motions.cpp 的 handle
         "LT":     {"action": "playLeftHookPunch"},
         "RT":     {"action": "playRightHookPunch"}
       }
-    }
-
+    } 
 每个按键的字段:
     action  — 要调用的动作函数名 (必需)
     arm     — 是否设置 motionArmed = true (可选，默认 false)
@@ -64,6 +63,10 @@ BUTTON_CHANNEL = {
     "RB":     ("REMOTE_PUNCH_CHANNEL",  "SWITCH_HIGH_MIN_US", "SWITCH_HIGH_MAX_US", "1"),
     "LT":     ("REMOTE_HOOK_CHANNEL",   "SWITCH_LOW_MIN_US",  "SWITCH_LOW_MAX_US",  "0"),
     "RT":     ("REMOTE_HOOK_CHANNEL",   "SWITCH_HIGH_MIN_US", "SWITCH_HIGH_MAX_US", "1"),
+    "DpadUp":    ("REMOTE_DPAD_VERTICAL_CHANNEL",   "SWITCH_HIGH_MIN_US", "SWITCH_HIGH_MAX_US", "1"),
+    "DpadDown":  ("REMOTE_DPAD_VERTICAL_CHANNEL",   "SWITCH_LOW_MIN_US",  "SWITCH_LOW_MAX_US",  "0"),
+    "DpadLeft":  ("REMOTE_DPAD_HORIZONTAL_CHANNEL", "SWITCH_LOW_MIN_US",  "SWITCH_LOW_MAX_US",  "0"),
+    "DpadRight": ("REMOTE_DPAD_HORIZONTAL_CHANNEL", "SWITCH_HIGH_MIN_US", "SWITCH_HIGH_MAX_US", "1"),
 }
 
 # Motions.cpp 路径
@@ -111,6 +114,10 @@ def generate_handle_remote_actions(buttons: dict) -> str:
             lines.append(f"    motionArmed = false;")
             lines.append(f"    idlePoseApplied = false;")
             lines.append(f"    returnToStandPending = false;")
+            lines.append(f"    {action}();")
+        elif special == "cancel":
+            lines.append(f"    {action}();")
+        elif special == "toggleDance":
             lines.append(f"    {action}();")
         elif arm:
             lines.append(f"    motionArmed = true;")

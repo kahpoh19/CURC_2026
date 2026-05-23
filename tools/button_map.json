@@ -1,18 +1,22 @@
 {
   "_comment": "按钮→动作映射表。修改 action 字段后运行: python3 tools/apply_button_map.py tools/button_map.json --apply",
-  "_comment_actions": "可用动作: applyStandPose, playSquadMotion, playPunchMotion, playFinalKickMotion, playDanceMotion, playDefenceMotion, playStandupBackMotion, playStandupFrontMotion, unloadAllServos",
-  "_comment_arm": "arm=true 表示按下后触发 motionArmed, 摇杆可接管控制",
+  "_comment_actions": "可用动作: applyStandPose, cancelAction, toggleDanceMotion, unloadAllServos, playSquadMotion, playPunchMotion, playFinalKickMotion, playDanceMotion, playDefenceMotion, playStandupBackMotion, playStandupFrontMotion, playDefaultMotion, playLeftPunch, playRightPunch, playLeftHookPunch, playRightHookPunch",
+  "_comment_special": "special模式: unload=卸载舵机+重置状态, cancel=取消动作并站起, toggleDance=切换Dance循环, arm=解锁摇杆",
 
   "buttons": {
-    "Start":  {"action": "applyStandPose", "arm": true},
-    "Select": {"action": "unloadAllServos", "special": "unload"},
-    "Y":      {"action": "applyStandPose", "arm": true},
-    "A":      {"action": "playSquadMotion"},
-    "B":      {"action": "playStandupBackMotion"},
-    "X":      {"action": "playStandupFrontMotion"},
-    "LB":     {"action": "playPunchMotion"},
-    "RB":     {"action": "playFinalKickMotion"},
-    "LT":     {"action": "playDanceMotion"},
-    "RT":     {"action": "playDefenceMotion"}
+    "Start":      {"action": "unloadAllServos", "special": "unload"},
+    "Select":     {"action": "cancelAction", "special": "cancel"},
+    "Y":          {"action": "applyStandPose", "arm": true},
+    "A":          {"action": "playSquadMotion"},
+    "B":          {"action": "playDefenceMotion"},
+    "X":          {"action": "toggleDanceMotion", "special": "toggleDance"},
+    "LB":         {"action": "playLeftHookPunch"},
+    "RB":         {"action": "playRightHookPunch"},
+    "LT":         {"action": "playPunchMotion"},
+    "RT":         {"action": "playRightPunch"},
+    "DpadUp":     {"action": "playStandupBackMotion"},
+    "DpadDown":   {"action": "playStandupFrontMotion"},
+    "DpadLeft":   {"action": "cancelAction", "special": "cancel"},
+    "DpadRight":  {"action": "cancelAction", "special": "cancel"}
   }
 }

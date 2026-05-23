@@ -202,6 +202,47 @@ static void hatToMotionAxes(uint8_t hat, bool buttonMask, int16_t *walk,
   }
 }
 
+static uint16_t hatToDpadPulse(uint8_t hat, bool buttonMask, bool vertical) {
+  if (hat == 0xFF) {
+    return REMOTE_CENTER_US;
+  }
+
+  bool up = false, down = false, left = false, right = false;
+
+  if (buttonMask) {
+    up = hat & 0x01;
+    down = hat & 0x02;
+    left = hat & 0x04;
+    right = hat & 0x08;
+  } else {
+    switch (hat) {
+      case 0: up = true; break;
+      case 1: up = true; right = true; break;
+      case 2: right = true; break;
+      case 3: down = true; right = true; break;
+      case 4: down = true; break;
+      case 5: down = true; left = true; break;
+      case 6: left = true; break;
+      case 7: up = true; left = true; break;
+      default: return REMOTE_CENTER_US;
+    }
+  }
+
+  if (vertical) {
+    if (up && !down)
+      return REMOTE_MAX_PULSE_US;
+    if (down && !up)
+      return REMOTE_MIN_PULSE_US;
+    return REMOTE_CENTER_US;
+  } else {
+    if (right && !left)
+      return REMOTE_MAX_PULSE_US;
+    if (left && !right)
+      return REMOTE_MIN_PULSE_US;
+    return REMOTE_CENTER_US;
+  }
+}
+
 static uint8_t reportAxisOffset(uint8_t reportId, const uint8_t *data,
                                 size_t length) {
   if (length >= 7 && reportId != 0 && data[0] == reportId) {
@@ -1430,17 +1471,13 @@ RemoteSnapshot readRemoteSnapshot() {
     snapshot.channels[i] = REMOTE_CENTER_US;
   }
 
-  int16_t dpadWalk = 0;
-  int16_t dpadStrafe = 0;
-  hatToMotionAxes(state.hat, state.hatIsButtonMask, &dpadWalk, &dpadStrafe);
-
-  snapshot.channels[REMOTE_WALK_CHANNEL] =
-      axisToPulse(dpadWalk != 0 ? dpadWalk : -state.ly);
-  snapshot.channels[REMOTE_STRAFE_CHANNEL] =
-      axisToPulse(dpadStrafe != 0 ? dpadStrafe : state.lx);
+  snapshot.channels[REMOTE_WALK_CHANNEL] = axisToPulse(-state.ly);
+  snapshot.channels[REMOTE_STRAFE_CHANNEL] = axisToPulse(state.lx);
   snapshot.channels[REMOTE_TURN_CHANNEL] = axisToPulse(state.rx);
   snapshot.channels[REMOTE_PUNCH_CHANNEL] =
       buttonSwitchPulse(state.buttons, BUTTON_LB_BIT, BUTTON_RB_BIT);
+  snapshot.channels[REMOTE_DPAD_VERTICAL_CHANNEL] =
+      hatToDpadPulse(state.hat, state.hatIsButtonMask, true);
   snapshot.channels[REMOTE_SYSTEM_CHANNEL] =
       buttonSwitchPulse(state.buttons, BUTTON_SELECT_BIT, BUTTON_START_BIT);
   snapshot.channels[REMOTE_HOOK_CHANNEL] =
@@ -1449,6 +1486,8 @@ RemoteSnapshot readRemoteSnapshot() {
       buttonSwitchPulse(state.buttons, BUTTON_A_BIT, BUTTON_Y_BIT);
   snapshot.channels[REMOTE_GETUP_CHANNEL] =
       buttonSwitchPulse(state.buttons, BUTTON_X_BIT, BUTTON_B_BIT);
+  snapshot.channels[REMOTE_DPAD_HORIZONTAL_CHANNEL] =
+      hatToDpadPulse(state.hat, state.hatIsButtonMask, false);
 
   snapshot.ageUs =
       state.lastReportUs == 0 ? UINT32_MAX : micros() - state.lastReportUs;

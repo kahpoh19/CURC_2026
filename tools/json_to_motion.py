@@ -65,13 +65,19 @@ NAME_OVERRIDE = {
     "stand 2.0": "STAND",
     "squad 2.0": "SQUAD",
     "Moveleft 2.0": "MOVELEFT",
+    "Moveleft 3.0": "MOVELEFT",
     "Moveright 2.0": "MOVERIGHT",
+    "Moveright 3.0": "MOVERIGHT",
     "backward 2.0": "BACKWARD",
     "Rotate Left 2.0": "ROTATELEFT",
     " Rotate Right 2.0": "ROTATERIGHT",
     "Defence": "DEFENCE",
     "Final Kick": "FINAL_KICK",
     "Punch": "PUNCH",
+    "Punch Left": "PUNCH_LEFT",
+    "Punch Right": "PUNCH_RIGHT",
+    "Elbow Left": "ELBOW_LEFT",
+    "Elbow Right": "ELBOW_RIGHT",
     "Dance": "DANCE",
     "standup back": "STANDUP_BACK",
     "standup front": "STANDUP_FRONT",
@@ -79,9 +85,13 @@ NAME_OVERRIDE = {
 
 # 哪些 group 放入 "poses" 区块，哪些放入 "gait" 区块
 POSE_GROUPS = {"默认", "stand 2.0", "squad 2.0",
-               "Defence", "Final Kick", "Punch", "Dance",
-               "standup back", "standup front"}
-GAIT_GROUPS = {"Forward", "backward 2.0", "Moveleft 2.0", "Moveright 2.0",
+               "Defence", "Final Kick", "Dance",
+               "standup back", "standup front",
+               "Punch Left", "Punch Right",
+               "Elbow Left", "Elbow Right"}
+GAIT_GROUPS = {"Forward", "backward 2.0",
+               "Moveleft 2.0", "Moveleft 3.0",
+               "Moveright 2.0", "Moveright 3.0",
                "Rotate Left 2.0", " Rotate Right 2.0"}
 
 # Motions.cpp 路径（相对于脚本所在 tools/ 目录）
