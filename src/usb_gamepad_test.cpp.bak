@@ -1,0 +1,536 @@
+// usb_gamepad_test.cpp
+// Standalone test: USB gamepad → ESP32-S3 connection + button printout.
+//
+// Usage:
+//   1. Rename src/main.cpp → src/main.bak.cpp
+//   2. Rename this file → src/main.cpp
+//   3. Build & flash with PlatformIO
+//   4. Plug in gamepad via USB, open Serial Monitor at 115200 baud
+//
+// Expected output:
+//   - "USB host started. Plug in a gamepad..."
+//   - On connect: VID/PID and protocol (XInput or HID)
+//   - On button press: "  [LB] pressed" / "  [A] released"
+//   - On stick/trigger move: "  LX=+320 LY=-150 RT=400"
+
+#include <Arduino.h>
+#include <stdarg.h>
+#include <string.h>
+#include "esp_intr_alloc.h"
+#include "usb/usb_host.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+// ── config ──────────────────────────────────────────────────────────
+static constexpr int AXIS_DEADZONE = 40;       // ignore tiny stick wobble
+static constexpr int AXIS_PRINT_DELTA = 25;    // only re-print if axis changed this much
+static constexpr int TRIGGER_PRINT_DELTA = 30;
+static constexpr uint32_t PRINT_INTERVAL_MS = 150;  // rate-limit axis prints
+
+// ── button bit positions (XInput / HID fallback) ────────────────────
+static constexpr uint8_t BIT_A      = 0;
+static constexpr uint8_t BIT_B      = 1;
+static constexpr uint8_t BIT_X      = 2;
+static constexpr uint8_t BIT_Y      = 3;
+static constexpr uint8_t BIT_LB     = 4;
+static constexpr uint8_t BIT_RB     = 5;
+static constexpr uint8_t BIT_SELECT = 6;
+static constexpr uint8_t BIT_START  = 7;
+static constexpr uint8_t BIT_L3     = 8;
+static constexpr uint8_t BIT_R3     = 9;
+
+static const char* buttonName(uint8_t bit) {
+  switch (bit) {
+    case BIT_A:      return "A";
+    case BIT_B:      return "B";
+    case BIT_X:      return "X";
+    case BIT_Y:      return "Y";
+    case BIT_LB:     return "LB";
+    case BIT_RB:     return "RB";
+    case BIT_SELECT: return "Select";
+    case BIT_START:  return "Start";
+    case BIT_L3:     return "L3";
+    case BIT_R3:     return "R3";
+    default:         return "?";
+  }
+}
+
+static const char* hatName(uint8_t hat) {
+  switch (hat) {
+    case 0:  return "N";
+    case 1:  return "NE";
+    case 2:  return "E";
+    case 3:  return "SE";
+    case 4:  return "S";
+    case 5:  return "SW";
+    case 6:  return "W";
+    case 7:  return "NW";
+    case 15:  return "center";
+    default: return "?";
+  }
+}
+
+// ── gamepad state ───────────────────────────────────────────────────
+struct State {
+  // axes  (-500..+500)
+  int16_t lx, ly, rx, ry, lt, rt;
+  uint32_t buttons;      // bitmask
+  uint8_t  hat;          // 0-7 for 8-way, 0x0f = center
+  bool     hatIsDpad;    // true: hat byte is a 4-bit dpad mask
+  bool     connected;
+  bool     reportSeen;
+  uint32_t lastReportMs;
+};
+static portMUX_TYPE stateMux = portMUX_INITIALIZER_UNLOCKED;
+static State gState = {};
+
+// ── USB host handles ────────────────────────────────────────────────
+static usb_host_client_handle_t usbClient = nullptr;
+static usb_device_handle_t      usbDevice = nullptr;
+static usb_transfer_t*          usbInTransfer = nullptr;
+static uint8_t  usbInterfaceNumber = 0;
+static bool     usbInterfaceClaimed = false;
+static bool     usbReady = false;
+
+enum Proto : uint8_t { PROTO_HID, PROTO_XINPUT };
+static Proto usbProto = PROTO_HID;
+
+// ── helpers ─────────────────────────────────────────────────────────
+static int16_t constrain16(int32_t v, int16_t lo, int16_t hi) {
+  if (v < lo) return lo;
+  if (v > hi) return hi;
+  return (int16_t)v;
+}
+
+// Print to BOTH Serial (USB-CDC) and Serial0 (UART0), so output
+// survives USB host init potentially taking over the USB peripheral.
+static void log(const char* msg) {
+  Serial.print(msg);
+  Serial0.print(msg);
+}
+static void logln(const char* msg) {
+  Serial.println(msg);
+  Serial0.println(msg);
+}
+static void logf(const char* fmt, ...) {
+  char buf[160];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(buf, sizeof(buf), fmt, args);
+  va_end(args);
+  log(buf);
+}
+
+// ── XInput parser  (14-byte report) ─────────────────────────────────
+static bool parseXinput(const uint8_t* data, size_t len) {
+  if (len < 14) return false;
+
+  const uint8_t* r = data;
+  // skip possible wrapper bytes if needed
+  if (data[0] == 0x00 && data[1] == 0x14 && len >= 14) {
+    r = data;
+  } else if (len >= 15 && data[1] == 0x00 && data[2] == 0x14) {
+    r = data + 1;
+  }
+  if (r[0] != 0x00 || r[1] < 0x14) return false;
+
+  uint32_t btns = 0;
+  if (r[3] & 0x10) btns |= 1UL << BIT_A;
+  if (r[3] & 0x20) btns |= 1UL << BIT_B;
+  if (r[3] & 0x40) btns |= 1UL << BIT_X;
+  if (r[3] & 0x80) btns |= 1UL << BIT_Y;
+  if (r[3] & 0x01) btns |= 1UL << BIT_LB;
+  if (r[3] & 0x02) btns |= 1UL << BIT_RB;
+  if (r[2] & 0x20) btns |= 1UL << BIT_SELECT;
+  if (r[2] & 0x10) btns |= 1UL << BIT_START;
+
+  int16_t lxRaw = (int16_t)(r[6]  | (r[7]  << 8));
+  int16_t lyRaw = (int16_t)(r[8]  | (r[9]  << 8));
+  int16_t rxRaw = (int16_t)(r[10] | (r[11] << 8));
+  int16_t ryRaw = (int16_t)(r[12] | (r[13] << 8));
+
+  portENTER_CRITICAL(&stateMux);
+  gState.lx  = constrain16(lxRaw / 66, -500, 500);
+  gState.ly  = constrain16(-lyRaw / 66, -500, 500);
+  gState.rx  = constrain16(rxRaw / 66, -500, 500);
+  gState.ry  = constrain16(-ryRaw / 66, -500, 500);
+  gState.lt  = (int16_t)(((int32_t)r[4] * 500) / 255);
+  gState.rt  = (int16_t)(((int32_t)r[5] * 500) / 255);
+  gState.buttons = btns;
+  gState.hat     = r[2] & 0x0f;
+  gState.hatIsDpad = true;
+  gState.connected = true;
+  gState.reportSeen = true;
+  gState.lastReportMs = millis();
+  portEXIT_CRITICAL(&stateMux);
+  return true;
+}
+
+// ── basic HID fallback  (4 axes + 1-4 button bytes) ─────────────────
+static void parseHidFallback(const uint8_t* data, size_t len) {
+  // Many simple gamepads use: 4 axis bytes + 1-4 button bytes
+  // Axes are 8-bit unsigned, center ≈ 0x80.
+  if (len < 5) return;
+
+  uint8_t axOff = 0;
+  if (len >= 7 && data[0] > 0 && data[0] <= 0x0f) axOff = 1; // report ID
+
+  if (len < axOff + 5u) return;
+
+  const uint8_t* ax = data + axOff;
+  int16_t lx = ((int16_t)ax[0] - 128) * 4;
+  int16_t ly = ((int16_t)ax[1] - 128) * 4;
+  int16_t rx = ((int16_t)ax[2] - 128) * 4;
+  int16_t ry = ((int16_t)ax[3] - 128) * 4;
+
+  uint32_t btns = 0;
+  uint8_t  hat  = 0x0f;
+  size_t btnOff = axOff + 4;
+  if (len > btnOff)     btns |= data[btnOff];
+  if (len > btnOff + 1) btns |= (uint32_t)data[btnOff + 1] << 8;
+  if (len > btnOff + 2) btns |= (uint32_t)data[btnOff + 2] << 16;
+  if (len > btnOff + 3) btns |= (uint32_t)data[btnOff + 3] << 24;
+
+  portENTER_CRITICAL(&stateMux);
+  gState.lx  = constrain16(lx, -500, 500);
+  gState.ly  = constrain16(ly, -500, 500);
+  gState.rx  = constrain16(rx, -500, 500);
+  gState.ry  = constrain16(ry, -500, 500);
+  gState.lt  = 0;
+  gState.rt  = 0;
+  gState.buttons = btns;
+  gState.hat     = btns & 0x0f;   // often dpad is low nibble of buttons[0]
+  gState.hatIsDpad = false;
+  gState.connected = true;
+  gState.reportSeen = true;
+  gState.lastReportMs = millis();
+  portEXIT_CRITICAL(&stateMux);
+}
+
+// ── USB transfer callback ───────────────────────────────────────────
+static void usbTransferCb(usb_transfer_t* transfer) {
+  if (transfer->status == USB_TRANSFER_STATUS_COMPLETED
+      && transfer->actual_num_bytes > 0) {
+    const uint8_t* buf = transfer->data_buffer;
+    size_t len = transfer->actual_num_bytes;
+
+    // Log raw bytes on every report so we can see the actual format
+    static uint8_t lastRaw[64] = {};
+    static size_t  lastRawLen = 0;
+    if (len != lastRawLen || memcmp(lastRaw, buf, len) != 0) {
+      char hex[192] = {};
+      for (size_t i = 0; i < len && i < 40; ++i)
+        snprintf(hex + i*3, sizeof(hex) - i*3, "%02X ", buf[i]);
+      logf("[RAW] len=%u  %s\n", (unsigned)len, hex);
+      memcpy(lastRaw, buf, len);
+      lastRawLen = len;
+    }
+
+    if (usbProto == PROTO_XINPUT) {
+      parseXinput(buf, len);
+    } else {
+      parseHidFallback(buf, len);
+    }
+  }
+
+  if (usbReady && transfer->status != USB_TRANSFER_STATUS_NO_DEVICE) {
+    usb_host_transfer_submit(transfer);
+  }
+}
+
+// ── USB device open ─────────────────────────────────────────────────
+static void closeUsb() {
+  usbReady = false;
+  if (usbInTransfer) {
+    usb_host_transfer_free(usbInTransfer);
+    usbInTransfer = nullptr;
+  }
+  if (usbInterfaceClaimed && usbDevice) {
+    usb_host_interface_release(usbClient, usbDevice, usbInterfaceNumber);
+    usbInterfaceClaimed = false;
+  }
+  if (usbDevice) {
+    usb_host_device_close(usbClient, usbDevice);
+    usbDevice = nullptr;
+  }
+
+  portENTER_CRITICAL(&stateMux);
+  gState.connected = false;
+  gState.reportSeen = false;
+  portEXIT_CRITICAL(&stateMux);
+}
+
+static void openUsbDevice(uint8_t address) {
+  if (usbDevice) {
+    logln("[USB] Already connected — ignoring second device.");
+    return;
+  }
+
+  esp_err_t err = usb_host_device_open(usbClient, address, &usbDevice);
+  if (err != ESP_OK) { logf("[USB] open failed: 0x%x\n", err); return; }
+
+  const usb_device_desc_t* devDesc = nullptr;
+  const usb_config_desc_t* cfgDesc = nullptr;
+  usb_host_get_device_descriptor(usbDevice, &devDesc);
+  usb_host_get_active_config_descriptor(usbDevice, &cfgDesc);
+
+  uint16_t vid = 0, pid = 0;
+  if (devDesc) {
+    vid = devDesc->idVendor;
+    pid = devDesc->idProduct;
+  }
+
+  // ─ walk descriptors to find interrupt IN endpoint ─────────────────
+  const usb_standard_desc_t* d =
+      reinterpret_cast<const usb_standard_desc_t*>(cfgDesc);
+  const usb_intf_desc_t* intf = nullptr;
+  int off = 0;
+  uint8_t bestEp = 0, bestIf = 0, bestAlt = 0;
+  uint16_t bestMps = 0;
+  uint8_t bestScore = 0;
+  Proto bestProto = PROTO_HID;
+
+  while (d) {
+    if (d->bDescriptorType == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
+      intf = reinterpret_cast<const usb_intf_desc_t*>(d);
+    } else if (d->bDescriptorType == USB_B_DESCRIPTOR_TYPE_ENDPOINT && intf) {
+      auto ep = reinterpret_cast<const usb_ep_desc_t*>(d);
+      bool isIn  = USB_EP_DESC_GET_EP_DIR(ep) != 0;
+      bool isIntr = USB_EP_DESC_GET_XFERTYPE(ep) == USB_TRANSFER_TYPE_INTR;
+      if (isIn && isIntr) {
+        uint8_t score = 0;
+        Proto   proto = PROTO_HID;
+        if (intf->bInterfaceClass == USB_CLASS_VENDOR_SPEC
+            && (intf->bInterfaceSubClass == 0x5d
+                || intf->bInterfaceProtocol == 0x01)) {
+          score = 100; proto = PROTO_XINPUT;
+        } else if (intf->bInterfaceClass == USB_CLASS_HID) {
+          score = 10; proto = PROTO_HID;
+        }
+        if (score > bestScore) {
+          bestScore = score; bestProto = proto;
+          bestEp = ep->bEndpointAddress;
+          bestIf = intf->bInterfaceNumber;
+          bestAlt = intf->bAlternateSetting;
+          bestMps = USB_EP_DESC_GET_MPS(ep);
+        }
+      }
+    }
+    d = usb_parse_next_descriptor(d, cfgDesc->wTotalLength, &off);
+  }
+
+  if (bestScore == 0) { logln("[USB] No interrupt IN endpoint found."); closeUsb(); return; }
+
+  usbProto = bestProto;
+  usbInterfaceNumber = bestIf;
+  err = usb_host_interface_claim(usbClient, usbDevice, bestIf, bestAlt);
+  if (err != ESP_OK) { logf("[USB] claim failed: 0x%x\n", err); closeUsb(); return; }
+  usbInterfaceClaimed = true;
+
+  int bufSize = usb_round_up_to_mps(64, bestMps);
+  err = usb_host_transfer_alloc(bufSize, 0, &usbInTransfer);
+  if (err != ESP_OK) { logf("[USB] transfer alloc failed: 0x%x\n", err); closeUsb(); return; }
+
+  usbInTransfer->device_handle    = usbDevice;
+  usbInTransfer->bEndpointAddress = bestEp;
+  usbInTransfer->callback         = usbTransferCb;
+  usbInTransfer->context          = nullptr;
+  usbInTransfer->num_bytes        = (size_t)bufSize;
+  usbReady = true;
+
+  logf("[USB] vid=0x%04x pid=0x%04x proto=%s ep=0x%02x mps=%u\n",
+       vid, pid,
+       bestProto == PROTO_XINPUT ? "XInput" : "HID",
+       bestEp, bestMps);
+
+  err = usb_host_transfer_submit(usbInTransfer);
+  if (err != ESP_OK) { logf("[USB] first submit failed: 0x%x\n", err); closeUsb(); }
+}
+
+// ── client event callback ───────────────────────────────────────────
+static void usbClientEvent(const usb_host_client_event_msg_t* event, void*) {
+  if (event->event == USB_HOST_CLIENT_EVENT_NEW_DEV) {
+    logf("[USB] device attached  addr=%u\n", event->new_dev.address);
+    openUsbDevice(event->new_dev.address);
+  } else if (event->event == USB_HOST_CLIENT_EVENT_DEV_GONE) {
+    logln("[USB] device removed.");
+    closeUsb();
+  }
+}
+
+// ── FreeRTOS tasks ──────────────────────────────────────────────────
+static void usbDaemonTask(void*) {
+  while (1) {
+    uint32_t flags = 0;
+    usb_host_lib_handle_events(portMAX_DELAY, &flags);
+  }
+}
+
+static void usbClientTask(void*) {
+  while (1) {
+    if (usbClient) usb_host_client_handle_events(usbClient, pdMS_TO_TICKS(20));
+    else vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+// ── print helpers ───────────────────────────────────────────────────
+static int16_t deadzone(int16_t v) {
+  return (v > -AXIS_DEADZONE && v < AXIS_DEADZONE) ? 0 : v;
+}
+
+static void printButtons(uint32_t newBits, uint32_t oldBits) {
+  for (uint8_t i = 0; i < 16; ++i) {
+    uint32_t mask = 1UL << i;
+    bool was = (oldBits & mask) != 0;
+    bool now = (newBits & mask) != 0;
+    if (now && !was)      logf("  [%s] pressed\n",  buttonName(i));
+    else if (!now && was) logf("  [%s] released\n", buttonName(i));
+  }
+}
+
+static void printHat(uint8_t hat, uint8_t oldHat, bool isDpad) {
+  if (hat == oldHat) return;
+
+  if (isDpad) {
+    // hat as 4-bit dpad mask: bit0=Up bit1=Dn bit2=L bit3=R
+    auto p = [&](uint8_t bit, const char* name) {
+      bool was = (oldHat & bit) != 0;
+      bool now = (hat   & bit) != 0;
+      if (now && !was)      logf("  [Dpad %s] pressed\n",  name);
+      else if (!now && was) logf("  [Dpad %s] released\n", name);
+    };
+    p(0x1, "Up"); p(0x2, "Down"); p(0x4, "Left"); p(0x8, "Right");
+  } else {
+    logf("  [Hat] %s → %s\n", hatName(oldHat), hatName(hat));
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// Setup
+// ═════════════════════════════════════════════════════════════════════
+void setup() {
+  Serial.begin(115200);
+  Serial0.begin(115200);
+
+  // Wait for USB-CDC to enumerate (like original waitForSerialMonitor)
+  uint32_t start = millis();
+  while (!Serial && millis() - start < 3000) { delay(10); }
+  delay(200);
+
+  logln("");
+  logln("==============================================");
+  logln("  USB Gamepad Test");
+  logln("  Plug in a gamepad via USB...");
+  logln("==============================================");
+
+  // ─ install USB host ──────────────────────────────────────────────
+  usb_host_config_t hostCfg = {};
+  hostCfg.skip_phy_setup = false;
+  hostCfg.intr_flags = ESP_INTR_FLAG_LEVEL1;
+  esp_err_t err = usb_host_install(&hostCfg);
+  if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    logf("[FATAL] USB host install failed: 0x%x\n", err);
+    return;
+  }
+
+  xTaskCreatePinnedToCore(usbDaemonTask, "usb_daemon", 4096, nullptr, 2, nullptr, 0);
+
+  usb_host_client_config_t clientCfg = {};
+  clientCfg.is_synchronous = false;
+  clientCfg.max_num_event_msg = 5;
+  clientCfg.async.client_event_callback = usbClientEvent;
+  clientCfg.async.callback_arg = nullptr;
+  err = usb_host_client_register(&clientCfg, &usbClient);
+  if (err != ESP_OK) {
+    logf("[FATAL] USB client register failed: 0x%x\n", err);
+    return;
+  }
+
+  xTaskCreatePinnedToCore(usbClientTask, "usb_client", 4096, nullptr, 2, nullptr, 0);
+  logln("[USB] Host started OK. Waiting for device...");
+  Serial.flush();
+  Serial0.flush();
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// Loop  — reads gState and prints changes
+// ═════════════════════════════════════════════════════════════════════
+void loop() {
+  static uint32_t lastButtons = 0;
+  static uint8_t  lastHat    = 0x0f;
+  static int16_t  lastAxes[6] = {};
+  static uint32_t lastPrintMs = 0;
+  static bool     hadSignal   = false;
+  static uint32_t lastHeartbeatMs = 0;
+
+  // ─ heartbeat: prove the board is alive ────────────────────────────
+  uint32_t nowMs = millis();
+  if (nowMs - lastHeartbeatMs >= 3000) {
+    portENTER_CRITICAL(&stateMux);
+    bool hbConn = gState.connected;
+    bool hbSeen = gState.reportSeen;
+    portEXIT_CRITICAL(&stateMux);
+    logf("[HB] uptime=%lus  usb_ready=%d  connected=%d  reportSeen=%d\n",
+         nowMs / 1000, (int)usbReady, (int)hbConn, (int)hbSeen);
+    lastHeartbeatMs = nowMs;
+  }
+
+  // ─ snapshot under lock ────────────────────────────────────────────
+  portENTER_CRITICAL(&stateMux);
+  bool     conn   = gState.connected && gState.reportSeen;
+  uint32_t btns   = gState.buttons;
+  uint8_t  hat    = gState.hat;
+  bool     hatDpad = gState.hatIsDpad;
+  int16_t  ax[6]  = { gState.lx, gState.ly, gState.rx,
+                       gState.ry, gState.lt, gState.rt };
+  portEXIT_CRITICAL(&stateMux);
+
+  // ─ connection transition ──────────────────────────────────────────
+  if (conn && !hadSignal) {
+    logln("Signal acquired!");
+    hadSignal = true;
+  }
+  if (!conn && hadSignal) {
+    logln("Signal lost.");
+    hadSignal = false;
+  }
+  if (!conn) { delay(20); return; }
+
+  // ─ buttons (instant print) ───────────────────────────────────────
+  if (btns != lastButtons) {
+    printButtons(btns, lastButtons);
+    lastButtons = btns;
+  }
+
+  // ─ hat (instant print) ───────────────────────────────────────────
+  if (hat != lastHat) {
+    printHat(hat, lastHat, hatDpad);
+    lastHat = hat;
+  }
+
+  // ─ axes (rate-limited) ───────────────────────────────────────────
+  uint32_t now = millis();
+  if (now - lastPrintMs >= PRINT_INTERVAL_MS) {
+    static const char* axisNames[6] = {"LX","LY","RX","RY","LT","RT"};
+    bool changed = false;
+    for (int i = 0; i < 6; ++i) {
+      int d = (int)deadzone(ax[i]) - (int)deadzone(lastAxes[i]);
+      if (d > AXIS_PRINT_DELTA || d < -AXIS_PRINT_DELTA
+          || (deadzone(ax[i]) != 0 && deadzone(lastAxes[i]) == 0)
+          || (deadzone(ax[i]) == 0 && deadzone(lastAxes[i]) != 0)) {
+        changed = true;
+        break;
+      }
+    }
+    if (changed) {
+      logf("  AXES  LX=%+5d LY=%+5d | RX=%+5d RY=%+5d | LT=%+4d RT=%+4d\n",
+           deadzone(ax[0]), deadzone(ax[1]),
+           deadzone(ax[2]), deadzone(ax[3]),
+           deadzone(ax[4]), deadzone(ax[5]));
+      for (int i = 0; i < 6; ++i) lastAxes[i] = ax[i];
+    }
+    lastPrintMs = now;
+  }
+
+  delay(10);
+}

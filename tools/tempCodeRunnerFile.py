@@ -1,0 +1,1 @@
+fashionstar_project_v5.6 movement v1.0.json (同目录)
