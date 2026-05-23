@@ -52,7 +52,7 @@ static constexpr ServoAngle STAND_FRAME_0[] = {
 };
 
 static constexpr MotionFrame STAND_MOTION[] = {
-    {STAND_FRAME_0, ARRAY_COUNT(STAND_FRAME_0), 700, 500},
+    {STAND_FRAME_0, ARRAY_COUNT(STAND_FRAME_0), 800, 500},
 };
 
 
@@ -272,7 +272,7 @@ static constexpr MotionFrame STANDUP_BACK_MOTION[] = {
     {STANDUP_BACK_FRAME_0, ARRAY_COUNT(STANDUP_BACK_FRAME_0), 500, 200},
     {STANDUP_BACK_FRAME_1, ARRAY_COUNT(STANDUP_BACK_FRAME_1), 500, 200},
     {STANDUP_BACK_FRAME_2, ARRAY_COUNT(STANDUP_BACK_FRAME_2), 500, 500},
-    {STANDUP_BACK_FRAME_3, ARRAY_COUNT(STANDUP_BACK_FRAME_3), 700, 100},
+    {STANDUP_BACK_FRAME_3, ARRAY_COUNT(STANDUP_BACK_FRAME_3), 700, 0},
     {STANDUP_BACK_FRAME_4, ARRAY_COUNT(STANDUP_BACK_FRAME_4), 1200, 2000},
     {STANDUP_BACK_FRAME_5, ARRAY_COUNT(STANDUP_BACK_FRAME_5), 1000, 500},
 };
@@ -294,15 +294,15 @@ static constexpr ServoAngle STANDUP_FRONT_FRAME_1[] = {
 };
 
 static constexpr ServoAngle STANDUP_FRONT_FRAME_2[] = {
-    {0, -30.0f}, {1, 0.0f}, {2, -70.0f}, {3, -180.0f}, {4, 180.0f},
-    {5, 30.0f}, {6, 0.0f}, {7, 70.0f}, {8, 10.0f}, {9, -10.0f},
+    {0, -30.0f}, {1, -90.0f}, {2, -70.0f}, {3, -180.0f}, {4, 180.0f},
+    {5, 30.0f}, {6, 90.0f}, {7, 70.0f}, {8, 10.0f}, {9, -10.0f},
     {10, 90.0f}, {11, -90.0f}, {12, 10.0f}, {13, -90.0f}, {14, 90.0f},
     {15, -10.0f}, {16, 0.0f},
 };
 
 static constexpr ServoAngle STANDUP_FRONT_FRAME_3[] = {
-    {0, 0.0f}, {1, 0.0f}, {2, -70.0f}, {3, -20.0f}, {4, 20.0f},
-    {5, 0.0f}, {6, 0.0f}, {7, 70.0f}, {8, 10.0f}, {9, -10.0f},
+    {0, 0.0f}, {1, -90.0f}, {2, -70.0f}, {3, -20.0f}, {4, 20.0f},
+    {5, 0.0f}, {6, 90.0f}, {7, 70.0f}, {8, 10.0f}, {9, -10.0f},
     {10, 90.0f}, {11, -90.0f}, {12, 10.0f}, {13, -90.0f}, {14, 90.0f},
     {15, -10.0f}, {16, 0.0f},
 };
@@ -318,7 +318,7 @@ static constexpr MotionFrame STANDUP_FRONT_MOTION[] = {
     {STANDUP_FRONT_FRAME_0, ARRAY_COUNT(STANDUP_FRONT_FRAME_0), 500, 200},
     {STANDUP_FRONT_FRAME_1, ARRAY_COUNT(STANDUP_FRONT_FRAME_1), 500, 200},
     {STANDUP_FRONT_FRAME_2, ARRAY_COUNT(STANDUP_FRONT_FRAME_2), 500, 200},
-    {STANDUP_FRONT_FRAME_3, ARRAY_COUNT(STANDUP_FRONT_FRAME_3), 1000, 1000},
+    {STANDUP_FRONT_FRAME_3, ARRAY_COUNT(STANDUP_FRONT_FRAME_3), 1200, 1000},
     {STANDUP_FRONT_FRAME_4, ARRAY_COUNT(STANDUP_FRONT_FRAME_4), 1000, 100},
 };
 
@@ -326,14 +326,14 @@ static constexpr MotionFrame STANDUP_FRONT_MOTION[] = {
 // Elbow Left
 static constexpr ServoAngle ELBOW_LEFT_FRAME_0[] = {
     {0, 0.0f}, {1, 0.0f}, {2, -70.0f}, {3, 0.0f}, {4, 70.0f},
-    {5, 60.0f}, {6, 0.0f}, {7, 70.0f}, {8, 10.0f}, {9, -10.0f},
+    {5, 60.0f}, {6, 0.0f}, {7, 60.0f}, {8, 10.0f}, {9, -10.0f},
     {10, 30.0f}, {11, -30.0f}, {12, 10.0f}, {13, -30.0f}, {14, 30.0f},
     {15, -10.0f}, {16, 0.0f},
 };
 
 static constexpr ServoAngle ELBOW_LEFT_FRAME_1[] = {
     {0, 0.0f}, {1, 0.0f}, {2, -70.0f}, {3, 0.0f}, {4, 70.0f},
-    {5, 110.0f}, {6, 0.0f}, {7, 70.0f}, {8, 10.0f}, {9, -10.0f},
+    {5, 110.0f}, {6, 0.0f}, {7, 60.0f}, {8, 10.0f}, {9, -10.0f},
     {10, 30.0f}, {11, -30.0f}, {12, 10.0f}, {13, -30.0f}, {14, 30.0f},
     {15, -10.0f}, {16, 0.0f},
 };
@@ -347,14 +347,14 @@ static constexpr ServoAngle ELBOW_LEFT_FRAME_2[] = {
 
 static constexpr ServoAngle ELBOW_LEFT_FRAME_3[] = {
     {0, 0.0f}, {1, 0.0f}, {2, -70.0f}, {3, 0.0f}, {4, 130.0f},
-    {5, 100.0f}, {6, 0.0f}, {7, 90.0f}, {8, 10.0f}, {9, -10.0f},
+    {5, 80.0f}, {6, 0.0f}, {7, 80.0f}, {8, 10.0f}, {9, -10.0f},
     {10, 30.0f}, {11, -30.0f}, {12, 10.0f}, {13, -30.0f}, {14, 30.0f},
     {15, -10.0f}, {16, 120.0f},
 };
 
 static constexpr ServoAngle ELBOW_LEFT_FRAME_4[] = {
     {0, 0.0f}, {1, 0.0f}, {2, -70.0f}, {3, 0.0f}, {4, 130.0f},
-    {5, 100.0f}, {6, 0.0f}, {7, 90.0f}, {8, 10.0f}, {9, -10.0f},
+    {5, 70.0f}, {6, 0.0f}, {7, 80.0f}, {8, 10.0f}, {9, -10.0f},
     {10, 30.0f}, {11, -30.0f}, {12, 10.0f}, {13, -30.0f}, {14, 30.0f},
     {15, -10.0f}, {16, 0.0f},
 };
@@ -536,52 +536,52 @@ static constexpr ServoAngle BACKWARD_FRAME_3[] = {
 };
 
 static constexpr MotionFrame BACKWARD_MOTION[] = {
-    {BACKWARD_FRAME_0, ARRAY_COUNT(BACKWARD_FRAME_0), 300, 0},
-    {BACKWARD_FRAME_1, ARRAY_COUNT(BACKWARD_FRAME_1), 300, 0},
-    {BACKWARD_FRAME_2, ARRAY_COUNT(BACKWARD_FRAME_2), 300, 0},
-    {BACKWARD_FRAME_3, ARRAY_COUNT(BACKWARD_FRAME_3), 300, 0},
+    {BACKWARD_FRAME_0, ARRAY_COUNT(BACKWARD_FRAME_0), 400, 0},
+    {BACKWARD_FRAME_1, ARRAY_COUNT(BACKWARD_FRAME_1), 400, 0},
+    {BACKWARD_FRAME_2, ARRAY_COUNT(BACKWARD_FRAME_2), 400, 0},
+    {BACKWARD_FRAME_3, ARRAY_COUNT(BACKWARD_FRAME_3), 400, 0},
 };
 
 
 // Rotate Left 2.0
 static constexpr ServoAngle ROTATELEFT_FRAME_0[] = {
-    {0, 0.0f}, {1, 0.0f}, {2, -70.0f}, {3, 0.0f}, {4, 0.0f},
-    {5, 0.0f}, {6, 0.0f}, {7, 70.0f}, {8, 10.0f}, {9, -10.0f},
-    {10, 20.0f}, {11, -20.0f}, {12, 10.0f}, {13, -10.0f}, {14, 50.0f},
+    {0, 0.0f}, {1, 0.0f}, {2, -60.0f}, {3, 0.0f}, {4, 0.0f},
+    {5, 0.0f}, {6, 0.0f}, {7, 60.0f}, {8, 10.0f}, {9, -10.0f},
+    {10, 30.0f}, {11, -20.0f}, {12, 10.0f}, {13, -10.0f}, {14, 50.0f},
     {15, -10.0f}, {16, 60.0f},
 };
 
 static constexpr ServoAngle ROTATELEFT_FRAME_1[] = {
-    {0, 0.0f}, {1, 0.0f}, {2, -70.0f}, {3, 0.0f}, {4, 0.0f},
-    {5, 0.0f}, {6, 0.0f}, {7, 70.0f}, {8, 10.0f}, {9, -10.0f},
+    {0, 0.0f}, {1, 0.0f}, {2, -60.0f}, {3, 0.0f}, {4, 0.0f},
+    {5, 0.0f}, {6, 0.0f}, {7, 60.0f}, {8, 10.0f}, {9, -10.0f},
     {10, 10.0f}, {11, -10.0f}, {12, 10.0f}, {13, -10.0f}, {14, 10.0f},
     {15, -10.0f}, {16, 0.0f},
 };
 
 static constexpr MotionFrame ROTATELEFT_MOTION[] = {
     {ROTATELEFT_FRAME_0, ARRAY_COUNT(ROTATELEFT_FRAME_0), 300, 200},
-    {ROTATELEFT_FRAME_1, ARRAY_COUNT(ROTATELEFT_FRAME_1), 800, 0},
+    {ROTATELEFT_FRAME_1, ARRAY_COUNT(ROTATELEFT_FRAME_1), 600, 0},
 };
 
 
 //  Rotate Right 2.0
 static constexpr ServoAngle ROTATERIGHT_FRAME_0[] = {
-    {0, 0.0f}, {1, 0.0f}, {2, -70.0f}, {3, 0.0f}, {4, 0.0f},
-    {5, 0.0f}, {6, 0.0f}, {7, 70.0f}, {8, 10.0f}, {9, -10.0f},
-    {10, 10.0f}, {11, -50.0f}, {12, 10.0f}, {13, -20.0f}, {14, 20.0f},
+    {0, 0.0f}, {1, 0.0f}, {2, -60.0f}, {3, 0.0f}, {4, 0.0f},
+    {5, 0.0f}, {6, 0.0f}, {7, 60.0f}, {8, 10.0f}, {9, -10.0f},
+    {10, 10.0f}, {11, -50.0f}, {12, 10.0f}, {13, -30.0f}, {14, 20.0f},
     {15, -10.0f}, {16, -60.0f},
 };
 
 static constexpr ServoAngle ROTATERIGHT_FRAME_1[] = {
-    {0, 0.0f}, {1, 0.0f}, {2, -70.0f}, {3, 0.0f}, {4, 0.0f},
-    {5, 0.0f}, {6, 0.0f}, {7, 70.0f}, {8, 10.0f}, {9, -10.0f},
+    {0, 0.0f}, {1, 0.0f}, {2, -60.0f}, {3, 0.0f}, {4, 0.0f},
+    {5, 0.0f}, {6, 0.0f}, {7, 60.0f}, {8, 10.0f}, {9, -10.0f},
     {10, 10.0f}, {11, -10.0f}, {12, 10.0f}, {13, -10.0f}, {14, 10.0f},
     {15, -10.0f}, {16, 0.0f},
 };
 
 static constexpr MotionFrame ROTATERIGHT_MOTION[] = {
     {ROTATERIGHT_FRAME_0, ARRAY_COUNT(ROTATERIGHT_FRAME_0), 300, 200},
-    {ROTATERIGHT_FRAME_1, ARRAY_COUNT(ROTATERIGHT_FRAME_1), 800, 0},
+    {ROTATERIGHT_FRAME_1, ARRAY_COUNT(ROTATERIGHT_FRAME_1), 600, 0},
 };
 
 
@@ -595,7 +595,7 @@ static constexpr ServoAngle MOVELEFT_FRAME_0[] = {
 
 static constexpr ServoAngle MOVELEFT_FRAME_1[] = {
     {0, 0.0f}, {1, 0.0f}, {2, -50.0f}, {3, 0.0f}, {4, 0.0f},
-    {5, 0.0f}, {6, 0.0f}, {7, 70.0f}, {8, 10.0f}, {9, -30.0f},
+    {5, 0.0f}, {6, 0.0f}, {7, 60.0f}, {8, 10.0f}, {9, -30.0f},
     {10, 30.0f}, {11, -30.0f}, {12, 0.0f}, {13, -10.0f}, {14, 10.0f},
     {15, -10.0f}, {16, 0.0f},
 };
@@ -615,7 +615,7 @@ static constexpr ServoAngle MOVELEFT_FRAME_3[] = {
 };
 
 static constexpr MotionFrame MOVELEFT_MOTION[] = {
-    {MOVELEFT_FRAME_0, ARRAY_COUNT(MOVELEFT_FRAME_0), 300, 0},
+    {MOVELEFT_FRAME_0, ARRAY_COUNT(MOVELEFT_FRAME_0), 500, 0},
     {MOVELEFT_FRAME_1, ARRAY_COUNT(MOVELEFT_FRAME_1), 300, 0},
     {MOVELEFT_FRAME_2, ARRAY_COUNT(MOVELEFT_FRAME_2), 300, 0},
     {MOVELEFT_FRAME_3, ARRAY_COUNT(MOVELEFT_FRAME_3), 300, 0},
@@ -652,7 +652,7 @@ static constexpr ServoAngle MOVERIGHT_FRAME_3[] = {
 };
 
 static constexpr MotionFrame MOVERIGHT_MOTION[] = {
-    {MOVERIGHT_FRAME_0, ARRAY_COUNT(MOVERIGHT_FRAME_0), 300, 0},
+    {MOVERIGHT_FRAME_0, ARRAY_COUNT(MOVERIGHT_FRAME_0), 500, 0},
     {MOVERIGHT_FRAME_1, ARRAY_COUNT(MOVERIGHT_FRAME_1), 300, 0},
     {MOVERIGHT_FRAME_2, ARRAY_COUNT(MOVERIGHT_FRAME_2), 300, 0},
     {MOVERIGHT_FRAME_3, ARRAY_COUNT(MOVERIGHT_FRAME_3), 300, 0},
